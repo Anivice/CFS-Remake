@@ -346,6 +346,11 @@ namespace cfs::log
         else if constexpr (is_error_log_t_v<ParamType>) {
             log_level = 3;
         }
+        else if (std::is_same_v<ParamType, unsigned char>)
+        {
+            *output << "0x" << std::hex << std::setw(2) << std::setfill('0')
+                << static_cast<unsigned>((*(uint8_t *)(&param)) & 0xFF); // ugly workarounds
+        }
         else {
             *output << param;
         }

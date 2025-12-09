@@ -10,6 +10,7 @@ add_library(cfs_obj STATIC
         src/misc/utils.cpp                      src/include/utils.h
         src/misc/execute.cpp                    src/include/execute.h
         src/misc/logger.cpp                     src/include/logger.h
+        src/cfs/mmap.cpp                        src/include/mmap.h
 )
 add_executable(cfs src/main.cpp)
 target_link_libraries(cfs PRIVATE cfs_obj)

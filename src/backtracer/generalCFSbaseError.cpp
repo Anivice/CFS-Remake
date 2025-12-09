@@ -210,12 +210,14 @@ std::string backtrace()
 cfs::error::generalCFSbaseError::generalCFSbaseError(const std::string& msg, bool include_backtrace_msg)
 {
     message = color::color(5,0,0) + "Error encountered: " + color::color(0,0,0,5,0,0) + msg + color::no_color();
+    message += "\n ==> errno: " +
+        (errno == 0 ? color::color(0,5,0) : color::color(5,0,0)) + strerror(errno) + color::no_color();
     if (include_backtrace_msg)
     {
         std::stringstream ss;
         ss << color::color(2,2,2) << "\n<=== BACKTRACE STARTS ===>\n" << color::no_color();
         ss << backtrace();
-        ss << color::color(2,2,2) << "<=== BACKTRACE ENDS ===>\n" << color::no_color();
+        ss << color::color(2,2,2) << "<=== BACKTRACE ENDS ===>" << color::no_color();
         message += ss.str();
     }
 }
