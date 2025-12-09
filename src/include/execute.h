@@ -26,6 +26,7 @@
 
 namespace cfs::utils
 {
+    /// command's status
     struct cmd_status
     {
         std::string fd_stdout; // normal output
@@ -33,8 +34,19 @@ namespace cfs::utils
         int exit_status{}; // exit status
     };
 
-    cmd_status exec_command_(const std::string &, const std::vector<std::string> &, const std::string &);
+    /// Execute an external process
+    /// @param cmd Full path to executable
+    /// @param args Arguments
+    /// @param input Child's stdin
+    /// @return Command's exit status, stdout, and stderr
+    cmd_status exec_command_(const std::string &cmd, const std::vector<std::string> &args, const std::string &input);
 
+    /// Execute an external process (template argument wrapper)
+    /// @param cmd Full path to executable
+    /// @param input Child's stdin
+    /// @param args Command's arguments
+    /// @return Command's exit status, stdout, and stderr
+    /// @example ../../example/execute.cpp
     template <typename... Strings>
     cmd_status exec_command(const std::string& cmd, const std::string &input, Strings&&... args)
     {

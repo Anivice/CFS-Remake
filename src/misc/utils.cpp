@@ -1,6 +1,9 @@
+#include <sys/stat.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
 #include "utils.h"
 
-std::string cfs::utils::getenv(const std::string& name)
+std::string cfs::utils::getenv(const std::string& name) noexcept
 {
     const auto var = ::getenv(name.c_str());
     if (var == nullptr) {
@@ -13,7 +16,7 @@ std::string cfs::utils::getenv(const std::string& name)
 std::string cfs::utils::replace_all(
     std::string & original,
     const std::string & target,
-    const std::string & replacement)
+    const std::string & replacement) noexcept
 {
     if (target.empty()) return original; // Avoid infinite loop if target is empty
 
@@ -29,4 +32,56 @@ std::string cfs::utils::replace_all(
     }
 
     return original;
+}
+
+std::pair < const int, const int > cfs::utils::get_screen_col_row() noexcept
+{
+    constexpr int term_col_size = 80;
+    constexpr int term_row_size = 25;
+    const auto col_size_from_env = cfs::utils::getenv("COLUMNS");
+    const auto row_size_from_env = cfs::utils::getenv("LINES");
+    long col_env = -1;
+    long row_env = -1;
+
+    try
+    {
+        if (!col_size_from_env.empty() && !row_size_from_env.empty()) {
+            col_env = std::strtol(col_size_from_env.c_str(), nullptr, 10);
+            row_env = std::strtol(row_size_from_env.c_str(), nullptr, 10);
+        }
+    } catch (...) {
+        col_env = -1;
+        row_env = -1;
+    }
+
+    auto get_pair = [&]->std::pair < const int, const int >
+    {
+        if (col_env != -1 && row_env != -1) {
+            return {row_env, col_env};
+        }
+
+        return {term_row_size, term_col_size};
+    };
+
+    bool is_terminal = false;
+    struct stat st{};
+    if (fstat(STDOUT_FILENO, &st) == -1) {
+        return get_pair();
+    }
+
+    if (isatty(STDOUT_FILENO)) {
+        is_terminal = true;
+    }
+
+    if (is_terminal)
+    {
+        winsize w{};
+        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) != 0 || (w.ws_col | w.ws_row) == 0) {
+            return get_pair();
+        }
+
+        return {w.ws_row, w.ws_col};
+    }
+
+    return get_pair();
 }

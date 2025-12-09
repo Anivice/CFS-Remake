@@ -1,7 +1,7 @@
 #ifndef CFS_COLORS_H
 #define CFS_COLORS_H
 
-#include "utils.h"
+#include <string>
 
 /// ANSI color codes
 namespace cfs::color

@@ -8,7 +8,7 @@
 #include <algorithm>
 #include "utils.h"
 #include "colors.h"
-#include "general_cfs_error.h"
+#include "generalCFSbaseError.h"
 #include "execute.h"
 
 #define MAX_STACK_FRAMES (64)
@@ -175,15 +175,15 @@ std::string backtrace_level_2()
                     << std::hex << cfs::color::color(2,4,5) << frame
                     << ": " << cfs::color::color(1,5,5) << info.name << cfs::color::no_color() << "\n";
                 if (!info.file.empty()) {
-                    ss  << cfs::color::color(0,1,5,5,5,5) << "      => " << info.file << cfs::color::no_color() << "\n";
+                    ss  << cfs::color::color(5,0,0) << "      => " << info.file << cfs::color::no_color() << "\n";
                 }
             }
             else
             {
-                ss  << cfs::color::color(3,3,3,5,5,5) << "Frame " << "#" << i++ << " "
+                ss  << cfs::color::color(3,3,3) << "Frame " << "#" << i++ << " "
                     << std::hex << frame << ": " << info.name << cfs::color::no_color() << "\n";
                 if (!info.file.empty()) {
-                    ss << cfs::color::color(3,3,3,5,5,5) << "         " << info.file << cfs::color::no_color() << "\n";
+                    ss << cfs::color::color(3,3,3) << "         " << info.file << cfs::color::no_color() << "\n";
                 }
             }
         } else {
@@ -207,7 +207,7 @@ std::string backtrace()
     }
 }
 
-cfs::error::general_cfs_error::general_cfs_error(const std::string& msg, bool include_backtrace_msg)
+cfs::error::generalCFSbaseError::generalCFSbaseError(const std::string& msg, bool include_backtrace_msg)
 {
     message = color::color(5,0,0) + "Error encountered: " + color::color(0,0,0,5,0,0) + msg + color::no_color();
     if (include_backtrace_msg)

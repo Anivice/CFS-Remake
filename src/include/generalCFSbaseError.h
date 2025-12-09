@@ -5,14 +5,14 @@
 
 namespace cfs::error
 {
-    class general_cfs_error : std::exception
+    class generalCFSbaseError : std::exception
     {
     protected:
         std::string message;
 
     public:
-        explicit general_cfs_error(const std::string& msg, bool include_backtrace_msg = false);
-        ~general_cfs_error() override = default;
+        explicit generalCFSbaseError(const std::string& msg, bool include_backtrace_msg = false);
+        ~generalCFSbaseError() override = default;
         [[nodiscard]] const char* what() const noexcept override { return message.c_str(); }
     };
 }

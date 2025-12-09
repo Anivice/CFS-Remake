@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <sys/stat.h>
 #include "colors.h"
+#include "utils.h"
 
 bool cfs::color::is_no_color() noexcept
 {
