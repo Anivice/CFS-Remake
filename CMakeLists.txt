@@ -36,8 +36,11 @@ function(add_unit_test EXECUTABLE_NAME)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE tsan atomic)
     endif()
 
-    add_test(NAME "test_${EXECUTABLE_NAME}" COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME})
-    message(STATUS "Unit test `test_${EXECUTABLE_NAME}` enabled")
+    add_custom_target(SYMBOL_LINK_FOR_TEST_${EXECUTABLE_NAME} ALL
+            COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME} ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test
+            COMMENT "Creating symbol link ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test => ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME}"
+            DEPENDS ${EXECUTABLE_NAME}
+            BYPRODUCTS ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test)
 endfunction()
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -53,6 +56,12 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
 
     enable_testing()
     add_unit_test(bitmap src/tests/bitmap.cpp)
+
+    add_subdirectory(src/imgInTerm)
+    add_executable(test_all src/tests/test.cpp)
+    target_compile_definitions(test_all PRIVATE CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}")
+    target_link_libraries(test_all PRIVATE cfs_obj tiv)
+    add_test(NAME "test" COMMAND ${CMAKE_CURRENT_BINARY_DIR}/test_all)
 else ()
     string(REPLACE " " ";" CC_ADDITIONAL_OPTIONS_LIST "${CC_ADDITIONAL_OPTIONS}")
     string(REPLACE " " ";" LD_ADDITIONAL_OPTIONS_LIST "${LD_ADDITIONAL_OPTIONS}")
