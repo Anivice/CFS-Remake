@@ -26,8 +26,8 @@ namespace cfs::basic_io
         void open(const std::string & file);
         void close();
 
-        char * data() const { return data_; }
-        unsigned long long int size() const { return size_; }
+        [[nodiscard]] char * data() const { return data_; }
+        [[nodiscard]] unsigned long long int size() const { return size_; }
     };
 }
 

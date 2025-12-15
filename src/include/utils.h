@@ -3,6 +3,7 @@
 
 #include <string>
 #include <cstdlib>
+#include <cstdint>
 
 /// Utilities
 namespace cfs::utils
@@ -25,6 +26,15 @@ namespace cfs::utils
     /// Get Row and Column size from terminal
     /// @return Pair in [Col (x), Row (y)], or 80x25 if all possible attempt failed
     std::pair < const int, const int > get_screen_col_row() noexcept;
+
+    namespace arithmetic
+    {
+        /// Get cells required to store all particles
+        /// @param cell_size Cell Size, i.e., particles inside each cell
+        /// @param particles Overall particles
+        /// @return Cells required to store all particles
+        uint64_t count_cell_with_cell_size(uint64_t cell_size, uint64_t particles) noexcept;
+    }
 }
 
 #include "colors.h"
