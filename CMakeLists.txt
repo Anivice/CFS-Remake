@@ -24,6 +24,8 @@ target_compile_definitions(cfs_obj PUBLIC
         CFS_STANDARD_VERSION="${CFS_STANDARD_VERSION}"
 )
 
+set(UNIT_TESTS "")
+
 # add_unit_test EXECUTABLE_NAME [FILES...]
 function(add_unit_test EXECUTABLE_NAME)
     add_executable(${EXECUTABLE_NAME} ${ARGN})
@@ -41,6 +43,9 @@ function(add_unit_test EXECUTABLE_NAME)
             COMMENT "Creating symbol link ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test => ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME}"
             DEPENDS ${EXECUTABLE_NAME}
             BYPRODUCTS ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test)
+
+    list(APPEND UNIT_TESTS "SYMBOL_LINK_FOR_TEST_${EXECUTABLE_NAME}")
+    set(UNIT_TESTS "${UNIT_TESTS}" PARENT_SCOPE)
 endfunction()
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -62,6 +67,8 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(test_all PRIVATE CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}")
     target_link_libraries(test_all PRIVATE cfs_obj tiv)
     add_test(NAME "test" COMMAND ${CMAKE_CURRENT_BINARY_DIR}/test_all)
+    add_dependencies(test_all ${UNIT_TESTS})
+    message(STATUS ${UNIT_TESTS})
 else ()
     string(REPLACE " " ";" CC_ADDITIONAL_OPTIONS_LIST "${CC_ADDITIONAL_OPTIONS}")
     string(REPLACE " " ";" LD_ADDITIONAL_OPTIONS_LIST "${LD_ADDITIONAL_OPTIONS}")

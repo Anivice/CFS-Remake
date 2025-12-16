@@ -2,6 +2,7 @@
 #define CFS_REMAKE_GENERAL_CFS_ERROR_H
 
 #include <stdexcept>
+#include <string>
 
 namespace cfs::error
 {

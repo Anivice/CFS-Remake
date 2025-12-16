@@ -48,7 +48,7 @@ namespace cfs::utils
     /// @return Command's exit status, stdout, and stderr
     /// @example ../../example/execute.cpp
     template <typename... Strings>
-    cmd_status exec_command(const std::string& cmd, const std::string &input, Strings&&... args)
+    cmd_status exec_command(const std::string& cmd, const std::string & input = "", Strings &&... args)
     {
         const std::vector<std::string> vec{std::forward<Strings>(args)...};
         return exec_command_(cmd, vec, input);

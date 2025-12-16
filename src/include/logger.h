@@ -70,6 +70,12 @@ namespace cfs::log
     inline class error_log_t {} error_log;
     construct_simple_type_compare(error_log_t);
 
+    inline class cursor_off_t {} cursor_off;
+    construct_simple_type_compare(cursor_off_t);
+
+    inline class cursor_on_t {} cursor_on;
+    construct_simple_type_compare(cursor_on_t);
+
     template <typename T> struct is_pair : std::false_type { };
     template <typename Key, typename Value> struct is_pair<std::pair<Key, Value>> : std::true_type { };
     template <typename T> constexpr bool is_pair_v = is_pair<T>::value;
@@ -269,7 +275,7 @@ namespace cfs::log
                 {
                 case 0: prefix =  color::color(1,1,1) + "[DEBUG]"; break;
                 case 1: prefix =  color::color(5,5,5) + "[INFO]"; break;
-                case 2: prefix =  color::color(0,5,5) + "[WARNING]"; break;
+                case 2: prefix =  color::color(5,5,0) + "[WARNING]"; break;
                 case 3: prefix =  color::color(5,0,0) + "[ERROR]"; break;
                 default: prefix = color::color(5,5,5) + "[INFO]"; break;
                 }
@@ -346,6 +352,12 @@ namespace cfs::log
         else if constexpr (is_error_log_t_v<ParamType>) {
             log_level = 3;
         }
+        else if constexpr (is_cursor_off_t_v<ParamType>) {
+            std::cerr << "\033[?25l";
+        }
+        else if constexpr (is_cursor_on_t_v<ParamType>) {
+            std::cerr << "\033[?25h";
+        }
         else if (std::is_same_v<ParamType, unsigned char>)
         {
             *output << "0x" << std::hex << std::setw(2) << std::setfill('0')
@@ -360,7 +372,7 @@ namespace cfs::log
     std::string strip_func_name(std::string);
 }
 
-#define logPrint(...)  (void)::cfs::log::cfs_logger.log(cfs::log::prefix_string_t(cfs::color::color(2,3,4) + "(" + cfs::log::strip_func_name(std::source_location::current().function_name()) + ") "), __VA_ARGS__)
+#define logPrint(...)   (void)::cfs::log::cfs_logger.log(cfs::log::prefix_string_t(cfs::color::color(2,3,4) + "(" + cfs::log::strip_func_name(std::source_location::current().function_name()) + ") "), __VA_ARGS__)
 #define DEBUG_LOG       (cfs::log::debug_log)
 #define INFO_LOG        (cfs::log::info_log)
 #define WARNING_LOG     (cfs::log::warning_log)
@@ -376,5 +388,7 @@ namespace cfs::log
 #define wlog(...) warningLogPrint(__VA_ARGS__)
 #define elog(...) errorLogPrint(__VA_ARGS__)
 
+#define cursor_off  (cfs::log::cursor_off)
+#define cursor_on   (cfs::log::cursor_on)
 
 #endif //CFS_LOGGER_H

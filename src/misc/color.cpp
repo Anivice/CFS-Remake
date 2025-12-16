@@ -3,6 +3,7 @@
 #include <string>
 #include <algorithm>
 #include <sys/stat.h>
+#include <unistd.h>
 #include "colors.h"
 #include "utils.h"
 
