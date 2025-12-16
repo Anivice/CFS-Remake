@@ -1,4 +1,5 @@
 #include "smart_block_t.h"
+#include "smart_block_t.h"
 #include "utils.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -56,41 +57,6 @@ void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit)
             data_array_[q] &= ~c;
         }
     }
-}
-
-void cfs::block_shared_lock_t::create(const basic_io::mmap *file, const uint64_t block_size)
-{
-    init_data_array = [&](const uint64_t bytes)->bool
-    {
-        try {
-            data.resize(bytes, 0);
-            data_array_ = data.data();
-            return true;
-        } catch (...) {
-            return false;
-        }
-    };
-
-    cfs::bitmap_base::init(file->size() / block_size);
-}
-
-cfs::block_t::block_t(
-    char * data,
-    block_shared_lock_t * bitlocker,
-    const uint64_t addressable_space,
-    const uint64_t start_address,
-    const uint64_t end_address,
-    const uint64_t block_size,
-    const uint64_t block_count)
-    :   bitlocker_(bitlocker),
-        data_(data),
-        addressable_space_(addressable_space),
-        start_address_(start_address),
-        end_address_(end_address),
-        block_size_(block_size),
-        block_count_(block_count)
-{
-
 }
 
 namespace solver
@@ -301,7 +267,36 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     file.close();
 }
 
-cfs::filesystem::filesystem(const std::string &path_to_block_file)
+cfs::cfs_head_t::runtime_info_t cfs::filesystem::cfs_header_block_t::load()
+{
+    bitlocker_->lock(0);
+    bitlocker_->lock(tailing_header_blk_id_);
+    const auto ret = fs_head->runtime_info;
+    bitlocker_->unlock(0);
+    bitlocker_->unlock(tailing_header_blk_id_);
+    return ret;
+}
+
+void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t & info)
+{
+    // first, lock both
+    bitlocker_->lock(0);
+    bitlocker_->lock(tailing_header_blk_id_);
+
+    // then, cow
+    fs_head->runtime_info_cow = fs_head->runtime_info;
+    fs_end->runtime_info_cow = fs_end->runtime_info;
+
+    // then, we load in
+    fs_head->runtime_info = info;
+    fs_end->runtime_info = info;
+
+    // unlock
+    bitlocker_->unlock(0);
+    bitlocker_->unlock(tailing_header_blk_id_);
+}
+
+cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info_({})
 {
     file_.open(path_to_block_file);
     if (file_.size() < sizeof(cfs_head_t)) {
@@ -325,7 +320,7 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file)
     std::map < uint64_t, decltype(header_temp->static_info) > static_info_map;
     std::vector < std::pair < uint64_t, decltype(header_temp->static_info) > > static_info_vector;
     bool patch_zeros = false;
-    decltype(static_info_) static_info_patch;
+    cfs_head_t::static_info_t static_info_patch = { };
     auto push = [&](const uint64_t crc64, const decltype(header_temp->static_info) & info)
     {
         if (info.block_size == 0 || info.blocks == 0
@@ -399,8 +394,13 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file)
         header_temp_tail->static_info_dup   = static_info_patch;
     }
 
-    static_info_ = header_temp->static_info;
-    bitlocker_.create(&file_, header_temp->static_info.block_size);
+    *(cfs_head_t::static_info_t*)&static_info_ = header_temp->static_info;
+
+    // init header
+    cfs_header_block.bitlocker_ = &bitlocker_;
+    *(uint64_t*)&cfs_header_block.tailing_header_blk_id_ = static_info_.blocks - 1;
+    cfs_header_block.fs_head = header_temp;
+    cfs_header_block.fs_end = header_temp_tail;
 }
 
 cfs::filesystem::~filesystem()

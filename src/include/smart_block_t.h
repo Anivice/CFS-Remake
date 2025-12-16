@@ -1,6 +1,7 @@
 #ifndef CFS_SMART_BLOCK_T_H
 #define CFS_SMART_BLOCK_T_H
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -8,8 +9,10 @@
 #include <functional>
 #include <memory>
 #include <thread>
+#include <map>
 #include "generalCFSbaseError.h"
 #include "mmap.h"
+#include "utils.h"
 
 make_simple_error_class(bitmap_base_init_data_array_returns_false);
 make_simple_error_class(cannot_even_read_cfs_header_in_that_small_tiny_file)
@@ -17,6 +20,7 @@ make_simple_error_class(not_even_a_cfs_filesystem)
 make_simple_error_class(filesystem_head_corrupt_and_unable_to_recover)
 make_simple_error_class(invalid_argument)
 make_simple_error_class(cannot_discard_blocks)
+make_simple_error_class(no_locks_available);
 
 namespace cfs
 {
@@ -58,20 +62,128 @@ namespace cfs
         void set_bit(uint64_t index, bool new_bit);
     };
 
-    /// block state lock
-    class block_shared_lock_t : public bitmap_base
-    {
+    class block_shared_lock_t {
+    public:
+        static constexpr size_t lock_numbers = 4; // 1024 * 16;
+        static constexpr uint64_t max_map_size = 1024ull * 512ull;
+
     private:
-        std::vector <uint8_t> data;
+        std::array < std::mutex, lock_numbers > lock_array_;
+        std::unordered_map < uint64_t /* block ID */, bool /* is allocated ? */ > lock_array_allocate_map_;
+        std::map < uint64_t /* block ID */, uint64_t /* lock ID */ > block_id_to_lock_id_map_;
+        uint64_t last_allocated_position = 0;
+        std::mutex g_lock_array_alloc_dealloc_mtx_;
 
     public:
-        block_shared_lock_t() = default;
-        ~block_shared_lock_t() override = default;
+        block_shared_lock_t() {
+            lock_array_allocate_map_.reserve(lock_numbers);
+        }
 
-        /// Create a state lock
-        /// @param file mmap file
-        /// @param block_size Block size
-        void create(const basic_io::mmap * file, uint64_t block_size);
+    private:
+
+        void deallocate_all_unlocked_unblocked()
+        {
+            for (auto && [ lock_id, alloc_status ] : lock_array_allocate_map_)
+            {
+                if (lock_array_[lock_id].try_lock())
+                {
+                    lock_array_[lock_id].unlock();
+                    auto ptr = std::ranges::find_if(block_id_to_lock_id_map_,
+                        [&](const std::pair < uint64_t /* block ID */, uint64_t /* lock ID */ > & pair)->bool {
+                        return pair.second == lock_id;
+                    });
+
+                    if (ptr != block_id_to_lock_id_map_.end()) {
+                        block_id_to_lock_id_map_.erase(ptr);
+                    }
+
+                    alloc_status = false;
+                }
+            }
+        }
+
+        uint64_t allocate_lock_array_unblocked(const uint64_t index)
+        {
+            if (block_id_to_lock_id_map_.size() == lock_numbers)
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    if (block_id_to_lock_id_map_.size() == lock_numbers) {
+                        deallocate_all_unlocked_unblocked();
+                        std::this_thread::sleep_for(std::chrono::nanoseconds(1l));
+                    } else {
+                        break;
+                    }
+                }
+            }
+
+            if (block_id_to_lock_id_map_.size() == lock_numbers) {
+                throw error::no_locks_available();
+            }
+
+            auto try_alloc_lock = [&](const uint64_t try_allocate_loc)->bool
+            {
+                if (try_allocate_loc >= lock_numbers) return false;
+                if (auto & status = lock_array_allocate_map_[try_allocate_loc]) {
+                    return false;
+                } else {
+                    status = true;
+                    return true;
+                }
+            };
+
+            last_allocated_position++;
+            while (!try_alloc_lock(last_allocated_position))
+            {
+                if (last_allocated_position < lock_numbers) {
+                    last_allocated_position++;
+                } else {
+                    last_allocated_position = 0;
+                }
+            }
+
+            block_id_to_lock_id_map_[index] = last_allocated_position;
+            return last_allocated_position;
+        }
+
+    public:
+        void lock(const uint64_t index)
+        {
+            // dlog("lock ", index, "\n");
+            std::mutex * mutex = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(g_lock_array_alloc_dealloc_mtx_);
+                const auto ptr = block_id_to_lock_id_map_.find(index);
+                if (ptr == block_id_to_lock_id_map_.end()) {
+                    const auto lock_id = allocate_lock_array_unblocked(index);
+                    mutex = &lock_array_[lock_id];
+                }
+                else {
+                    mutex = &lock_array_[ptr->second];
+                }
+            }
+
+            if (mutex) {
+                mutex->lock();
+            }
+            // dlog("locked ", index, ", map: ", block_id_to_lock_id_map_, "\n");
+        }
+
+        void unlock(const uint64_t index)
+        {
+            std::mutex * mutex = nullptr;
+            {
+                std::lock_guard<std::mutex> lock(g_lock_array_alloc_dealloc_mtx_);
+                const auto ptr = block_id_to_lock_id_map_.find(index);
+                if (ptr != block_id_to_lock_id_map_.end()) {
+                    mutex = &lock_array_[ptr->second];
+                }
+            }
+            if (mutex) {
+                mutex->unlock();
+                // dlog("unlocked ", index, "\n");
+            }
+        }
     };
 
     constexpr uint64_t cfs_magick_number = 0xCFADBEEF20251216;
@@ -124,37 +236,6 @@ namespace cfs
         } _reserved_;
     };
     static_assert(sizeof(cfs_head_t) == cfs_header_size, "Faulty header size");
-
-    class block_t {
-    protected:
-        block_shared_lock_t * bitlocker_; // block bit locker
-        char * data_; // mapped file address
-        const uint64_t addressable_space_; // block size addressable for this block_t
-        const uint64_t start_address_; // start address in linear
-        const uint64_t end_address_; // end address in linear
-        const uint64_t block_size_; // block size
-        const uint64_t block_count_; // blocks in this block_t
-
-        /// Create a block
-        /// @param data Starting address of the block
-        /// @param bitlocker Block bit locker
-        /// @param addressable_space block size addressable for this block_t
-        /// @param start_address Block starting address
-        /// @param end_address Block ending address
-        /// @param block_size Individual block size
-        /// @param block_count Total blocks in this block_t
-        block_t(char * data,
-            block_shared_lock_t * bitlocker,
-            uint64_t addressable_space,
-            uint64_t start_address,
-            uint64_t end_address,
-            uint64_t block_size,
-            uint64_t block_count);
-
-    public:
-        friend class smart_block_t;
-    };
-
     constexpr uint64_t cfs_minimum_size = 1024 * 1024 * 1;
 
     /// Format a CFS
@@ -169,11 +250,68 @@ namespace cfs
     private:
         basic_io::mmap file_;
         block_shared_lock_t bitlocker_;
-        cfs_head_t::static_info_t static_info_;
+        const cfs_head_t::static_info_t static_info_;
+
+    protected:
+        class cfs_header_block_t {
+        private:
+            block_shared_lock_t * bitlocker_ = nullptr;
+            const uint64_t tailing_header_blk_id_ = 0;
+            cfs_head_t * fs_head;
+            cfs_head_t * fs_end;
+
+        public:
+            /// get runtime info from header blocks (both tailing and leading)
+            /// @return Runtime info
+            cfs_head_t::runtime_info_t load();
+
+            /// set runtime info to header blocks (both tailing and leading)
+            /// @param info New runtime info
+            void set(const cfs_head_t::runtime_info_t &info);
+
+        private:
+            cfs_header_block_t() = default;
+            ~cfs_header_block_t() = default;
+
+        public:
+            friend class filesystem;
+        } cfs_header_block;
 
     public:
         /// check headers, fix if possible, and create a bit state locker for all blocks
         explicit filesystem(const std::string & path_to_block_file);
+
+        /// lock guard
+        class guard {
+        private:
+            block_shared_lock_t * bitlocker_;
+            char * data_;
+            uint64_t block_address_;
+            guard(block_shared_lock_t * bitlocker, char * data, const uint64_t block_address) :
+                bitlocker_(bitlocker), data_(data), block_address_(block_address)
+            {
+                bitlocker_->lock(block_address_);
+            }
+
+        public:
+            ~guard() {
+                // dlog("unlock ", block_address_, "\n");
+                bitlocker_->unlock(block_address_);
+            }
+
+            /// get the address of the currently locked block page
+            char * data() const { return data_; }
+
+            friend class filesystem;
+        };
+
+        /// Lock a certain block
+        /// @param index Block ID to lock
+        /// @return lock_guard
+        guard lock(const uint64_t index) {
+            cfs_assert_simple(index > 0 && index < static_info_.blocks - 1);
+            return guard(&this->bitlocker_, this->file_.data() + index * static_info_.block_size, index);
+        }
 
         /// flush all data, write clean flag, close file
         ~filesystem();
