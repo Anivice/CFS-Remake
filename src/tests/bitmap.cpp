@@ -28,7 +28,7 @@ public:
     }
 };
 
-int main(int argc, char** argv)
+int main()
 {
     try
     {
@@ -58,9 +58,9 @@ int main(int argc, char** argv)
             }
         }
 
-        std::atomic < uint64_t > total = 0;
-        std::thread Check([&]
+        auto Check = [&]
         {
+            uint64_t total = 0;
             for (uint64_t i = 0; i < len; i++) {
                 total += bitmap.get_bit(i);
             }
@@ -68,10 +68,17 @@ int main(int argc, char** argv)
             if (total != total_positives) {
                 std::abort();
             }
+        };
+
+        std::vector<std::thread> threads;
+        for (int i = 0; i < std::thread::hardware_concurrency(); i++) {
+            threads.emplace_back(Check);
+        }
+
+        std::ranges::for_each(threads, [](std::thread & T0) {
+            if (T0.joinable()) T0.join();
         });
 
-        if (Check.joinable()) Check.join();
-        std::cout << total << " == " << total_positives << std::endl;
         return EXIT_SUCCESS;
     }
     catch (cfs::error::generalCFSbaseError & e) {

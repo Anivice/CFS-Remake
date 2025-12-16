@@ -27,7 +27,7 @@ cfs::log::Logger::Logger() noexcept
 #if (DEBUG)
     filter_level = 0;
 #else
-    filter_level = 2;
+    filter_level = 1;
 #endif
 
     endl_found_in_last_log = true;
