@@ -33,13 +33,15 @@ int main(int argc, char ** argv)
             for (int i = 0; i < 127;)
             {
                 try {
-                    auto lock = fs.lock(index);
-                    auto lock_1 = fs.lock(index + 1);
-                    (*lock.data())++;
+                    auto lock = fs.lock(index, index + 1);
+                    const char c = *lock.data();
+                    std::memset(lock.data(), i ^ (index & 0xFF), lock.size());
+                    *lock.data() = c + 1;
                     write(1, ".", 1);
                     i++;
                 } catch (...) {
-                    // std::this_thread::sleep_for(std::chrono::milliseconds(100l));
+                    // __asm__("nop");
+                    std::this_thread::sleep_for(std::chrono::microseconds(10l));
                 }
             }
 

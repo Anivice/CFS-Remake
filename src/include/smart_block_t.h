@@ -62,51 +62,6 @@ namespace cfs
         void set_bit(uint64_t index, bool new_bit);
     };
 
-    class block_shared_lock_t {
-    private:
-        const uint64_t blocks_ = 0;
-        class bitmap_t : public cfs::bitmap_base {
-        private:
-            std::vector <uint8_t> data;
-
-        public:
-            void create(const uint64_t size)
-            {
-                init_data_array = [&](const uint64_t bytes)->bool
-                {
-                    try {
-                        data.resize(bytes, 0);
-                        data_array_ = data.data();
-                        return true;
-                    } catch (...) {
-                        return false;
-                    }
-                };
-
-                cfs::bitmap_base::init(size);
-            }
-        } bitmap;
-
-        void init()
-        {
-            bitmap.create(blocks_);
-        }
-
-        std::mutex bitmap_mtx_;
-
-    public:
-        /// lock by index
-        /// @param index Block ID index
-        /// @return If lock succeeded, it returns true, else it returns false
-        bool lock(uint64_t index);
-
-        /// unlock by index
-        /// @param index Block ID index
-        void unlock(uint64_t index);
-
-        friend class filesystem;
-    };
-
     constexpr uint64_t cfs_magick_number = 0xCFADBEEF20251216;
     constexpr uint64_t cfs_header_size = 512;
 
@@ -168,6 +123,37 @@ namespace cfs
 
     class filesystem
     {
+    public:
+        class guard_continuous;
+        class block_shared_lock_t {
+        private:
+            const uint64_t blocks_ = 0;
+            class bitmap_t : public cfs::bitmap_base {
+            private:
+                std::vector <uint8_t> data;
+
+            public:
+                void create(uint64_t size);
+            } bitmap;
+
+            /// init bitmap
+            void init() { bitmap.create(blocks_); }
+            std::mutex bitmap_mtx_;
+
+        public:
+            /// lock by index
+            /// @param index Block ID index
+            /// @return If lock succeeded, it returns true, else it returns false
+            bool lock(uint64_t index);
+
+            /// unlock by index
+            /// @param index Block ID index
+            void unlock(uint64_t index);
+
+            friend class filesystem;
+            friend class guard_continuous;
+        };
+
     private:
         basic_io::mmap file_;
         block_shared_lock_t bitlocker_;
@@ -176,7 +162,7 @@ namespace cfs
     protected:
         class cfs_header_block_t {
         private:
-            block_shared_lock_t * bitlocker_ = nullptr;
+            filesystem * parent_ = nullptr;
             const uint64_t tailing_header_blk_id_ = 0;
             cfs_head_t * fs_head;
             cfs_head_t * fs_end;
@@ -207,9 +193,16 @@ namespace cfs
         private:
             block_shared_lock_t * bitlocker_;
             char * data_;
-            uint64_t block_address_;
-            guard(block_shared_lock_t * bitlocker, char * data, const uint64_t block_address) :
-                bitlocker_(bitlocker), data_(data), block_address_(block_address)
+            const uint64_t block_address_;
+            const uint64_t block_size_;
+
+            /// make lock guard
+            /// @param bitlocker global lock
+            /// @param data block data
+            /// @param block_address block ID
+            /// @param block_size Block size
+            guard(block_shared_lock_t * bitlocker, char * data, const uint64_t block_address, const uint64_t block_size) :
+                bitlocker_(bitlocker), data_(data), block_address_(block_address), block_size_(block_size)
             {
                 if (!bitlocker_->lock(block_address_)) {
                     throw error::block_is_in_use();
@@ -222,7 +215,12 @@ namespace cfs
             }
 
             /// get the address of the currently locked block page
+            /// @return data pointer
             char * data() const { return data_; }
+
+            /// return accessible size
+            /// @return accessible size
+            [[nodiscard]] uint64_t size() const { return block_size_; }
 
             guard& operator=(const guard&) = delete;
             guard(const guard&) = delete;
@@ -231,12 +229,85 @@ namespace cfs
             friend class filesystem;
         };
 
+        /// lock guard
+        class guard_continuous {
+        private:
+            block_shared_lock_t * bitlocker_;
+            char * data_;
+            const uint64_t start_;
+            const uint64_t end_;
+            const uint64_t block_size_;
+
+            /// make lock guard (continuous)
+            /// @param bitlocker global lock
+            /// @param data block data
+            /// @param start Region block ID to lock (start)
+            /// @param end Region block ID to lock (end)
+            /// @param block_size Block size
+            guard_continuous(block_shared_lock_t * bitlocker, char * data, const uint64_t start, const uint64_t end, const uint64_t block_size) :
+                bitlocker_(bitlocker), data_(data), start_(start), end_(end), block_size_(block_size)
+            {
+                std::lock_guard lock(bitlocker_->bitmap_mtx_);
+                for (auto i = start; i <= end; i++)
+                {
+                    if (bitlocker_->bitmap.get_bit(i)) {
+                        throw error::block_is_in_use();
+                    }
+                }
+
+                for (auto i = start; i <= end; i++) {
+                    bitlocker_->bitmap.set_bit(i, true);
+                }
+            }
+
+        public:
+            ~guard_continuous()
+            {
+                std::lock_guard lock(bitlocker_->bitmap_mtx_);
+                for (auto i = start_; i <= end_; i++) {
+                    bitlocker_->bitmap.set_bit(i, false);
+                }
+            }
+
+            /// get the address of the currently locked block page
+            /// @return data pointer
+            char * data() const { return data_; }
+
+            /// return accessible size
+            /// @return accessible size
+            [[nodiscard]] uint64_t size() const { return (end_ - start_ + 1) * block_size_; }
+
+            guard_continuous& operator=(const guard_continuous&) = delete;
+            guard_continuous(const guard_continuous&) = delete;
+            guard_continuous& operator=(guard_continuous&&) = delete;
+            guard_continuous(guard_continuous&&) = delete;
+            friend class filesystem;
+        };
+
         /// Lock a certain block
         /// @param index Block ID to lock
         /// @return lock_guard
         guard lock(const uint64_t index) {
             cfs_assert_simple(index > 0 && index < static_info_.blocks - 1);
-            return guard(&this->bitlocker_, this->file_.data() + index * static_info_.block_size, index);
+            return guard(
+                &this->bitlocker_,
+                this->file_.data() + index * static_info_.block_size,
+                index,
+                static_info_.block_size);
+        }
+
+        /// Lock a region of blocks
+        /// @param start Region block ID to lock (start)
+        /// @param end Region block ID to lock (end)
+        /// @return lock_guard
+        guard_continuous lock(const uint64_t start, const uint64_t end) {
+            cfs_assert_simple(start > 0 && end < static_info_.blocks - 1 && start < end);
+            return guard_continuous(
+                &this->bitlocker_,
+                this->file_.data() + start * static_info_.block_size,
+                start,
+                end,
+                static_info_.block_size);
         }
 
         /// flush all data, write clean flag, close file

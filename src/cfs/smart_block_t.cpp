@@ -267,21 +267,35 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     file.close();
 }
 
+void cfs::filesystem::block_shared_lock_t::bitmap_t::create(const uint64_t size)
+{
+    init_data_array = [&](const uint64_t bytes)->bool
+    {
+        try {
+            data.resize(bytes, 0);
+            data_array_ = data.data();
+            return true;
+        } catch (...) {
+            return false;
+        }
+    };
+
+    cfs::bitmap_base::init(size);
+}
+
 cfs::cfs_head_t::runtime_info_t cfs::filesystem::cfs_header_block_t::load()
 {
-    bitlocker_->lock(0);
-    bitlocker_->lock(tailing_header_blk_id_);
+    auto blk0 = parent_->lock(0);
+    auto blk_last = parent_->lock(tailing_header_blk_id_);
     const auto ret = fs_head->runtime_info;
-    bitlocker_->unlock(0);
-    bitlocker_->unlock(tailing_header_blk_id_);
     return ret;
 }
 
 void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t & info)
 {
     // first, lock both
-    bitlocker_->lock(0);
-    bitlocker_->lock(tailing_header_blk_id_);
+    auto blk0 = parent_->lock(0);
+    auto blk_last = parent_->lock(tailing_header_blk_id_);
 
     // then, cow
     fs_head->runtime_info_cow = fs_head->runtime_info;
@@ -290,13 +304,9 @@ void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t &
     // then, we load in
     fs_head->runtime_info = info;
     fs_end->runtime_info = info;
-
-    // unlock
-    bitlocker_->unlock(0);
-    bitlocker_->unlock(tailing_header_blk_id_);
 }
 
-bool cfs::block_shared_lock_t::lock(const uint64_t index)
+bool cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)
 {
     std::lock_guard lock(bitmap_mtx_);
     if (bitmap.get_bit(index)) return false;
@@ -304,7 +314,7 @@ bool cfs::block_shared_lock_t::lock(const uint64_t index)
     return true;
 }
 
-void cfs::block_shared_lock_t::unlock(const uint64_t index)
+void cfs::filesystem::block_shared_lock_t::unlock(const uint64_t index)
 {
     std::lock_guard lock(bitmap_mtx_);
     bitmap.set_bit(index, false);
@@ -411,7 +421,7 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
     *(cfs_head_t::static_info_t*)&static_info_ = header_temp->static_info;
 
     // init header
-    cfs_header_block.bitlocker_ = &bitlocker_;
+    cfs_header_block.parent_ = this;
     *(uint64_t*)&cfs_header_block.tailing_header_blk_id_ = static_info_.blocks - 1;
     cfs_header_block.fs_head = header_temp;
     cfs_header_block.fs_end = header_temp_tail;
