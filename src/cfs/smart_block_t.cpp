@@ -44,7 +44,7 @@ void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit)
 {
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
-    uint8_t c = new_bit & 0x01;
+    uint8_t c = 0x01;
     c <<= r;
     {
         std::lock_guard<std::mutex> lock(array_mtx_);
@@ -296,6 +296,20 @@ void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t &
     bitlocker_->unlock(tailing_header_blk_id_);
 }
 
+bool cfs::block_shared_lock_t::lock(const uint64_t index)
+{
+    std::lock_guard lock(bitmap_mtx_);
+    if (bitmap.get_bit(index)) return false;
+    bitmap.set_bit(index, true);
+    return true;
+}
+
+void cfs::block_shared_lock_t::unlock(const uint64_t index)
+{
+    std::lock_guard lock(bitmap_mtx_);
+    bitmap.set_bit(index, false);
+}
+
 cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info_({})
 {
     file_.open(path_to_block_file);
@@ -402,6 +416,7 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
     cfs_header_block.fs_head = header_temp;
     cfs_header_block.fs_end = header_temp_tail;
     *(uint64_t*)&bitlocker_.blocks_ = static_info_.blocks;
+    bitlocker_.init();
 }
 
 cfs::filesystem::~filesystem()

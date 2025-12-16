@@ -20,7 +20,7 @@ make_simple_error_class(not_even_a_cfs_filesystem)
 make_simple_error_class(filesystem_head_corrupt_and_unable_to_recover)
 make_simple_error_class(invalid_argument)
 make_simple_error_class(cannot_discard_blocks)
-make_simple_error_class(no_locks_available);
+make_simple_error_class(block_is_in_use);
 
 namespace cfs
 {
@@ -63,30 +63,46 @@ namespace cfs
     };
 
     class block_shared_lock_t {
-    public:
-        static constexpr size_t lock_numbers = 1024 * 16;
-        static constexpr uint64_t max_map_size = 1024ull * 512ull;
-
     private:
         const uint64_t blocks_ = 0;
-        std::array<std::mutex, lock_numbers> lock_array_;
+        class bitmap_t : public cfs::bitmap_base {
+        private:
+            std::vector <uint8_t> data;
+
+        public:
+            void create(const uint64_t size)
+            {
+                init_data_array = [&](const uint64_t bytes)->bool
+                {
+                    try {
+                        data.resize(bytes, 0);
+                        data_array_ = data.data();
+                        return true;
+                    } catch (...) {
+                        return false;
+                    }
+                };
+
+                cfs::bitmap_base::init(size);
+            }
+        } bitmap;
+
+        void init()
+        {
+            bitmap.create(blocks_);
+        }
+
+        std::mutex bitmap_mtx_;
 
     public:
-        void lock(const uint64_t index)
-        {
-            const auto num_per_group = std::max(blocks_ / lock_numbers, 1ul);
-            auto group = index / num_per_group;
-            if (group >= lock_numbers) group = lock_numbers - 1;
-            lock_array_[group].lock();
-        }
+        /// lock by index
+        /// @param index Block ID index
+        /// @return If lock succeeded, it returns true, else it returns false
+        bool lock(uint64_t index);
 
-        void unlock(const uint64_t index)
-        {
-            const auto num_per_group = std::max(blocks_ / lock_numbers, 1ul);
-            auto group = index / num_per_group;
-            if (group >= lock_numbers) group = lock_numbers - 1;
-            lock_array_[group].unlock();
-        }
+        /// unlock by index
+        /// @param index Block ID index
+        void unlock(uint64_t index);
 
         friend class filesystem;
     };
@@ -195,18 +211,23 @@ namespace cfs
             guard(block_shared_lock_t * bitlocker, char * data, const uint64_t block_address) :
                 bitlocker_(bitlocker), data_(data), block_address_(block_address)
             {
-                bitlocker_->lock(block_address_);
+                if (!bitlocker_->lock(block_address_)) {
+                    throw error::block_is_in_use();
+                }
             }
 
         public:
             ~guard() {
-                // dlog("unlock ", block_address_, "\n");
                 bitlocker_->unlock(block_address_);
             }
 
             /// get the address of the currently locked block page
             char * data() const { return data_; }
 
+            guard& operator=(const guard&) = delete;
+            guard(const guard&) = delete;
+            guard& operator=(guard&&) = delete;
+            guard(guard&&) = delete;
             friend class filesystem;
         };
 

@@ -29,16 +29,17 @@ int main(int argc, char ** argv)
         std::atomic_int counter(0);
         auto T0 = [&](const uint64_t index)
         {
-            pthread_setname_np(pthread_self(), "T0");
+            pthread_setname_np(pthread_self(), ("T" + std::to_string(index)).c_str());
             for (int i = 0; i < 127;)
             {
                 try {
                     auto lock = fs.lock(index);
+                    auto lock_1 = fs.lock(index + 1);
                     (*lock.data())++;
                     write(1, ".", 1);
                     i++;
                 } catch (...) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100l));
+                    // std::this_thread::sleep_for(std::chrono::milliseconds(100l));
                 }
             }
 
