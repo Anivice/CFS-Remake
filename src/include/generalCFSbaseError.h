@@ -25,8 +25,24 @@ namespace cfs::error                                                            
     {                                                                                           \
     public:                                                                                     \
         explicit name(const std::string & what) : generalCFSbaseError(#name ": " + what) { }    \
+        name() : generalCFSbaseError(#name) { }                                                 \
         ~name() override = default;                                                             \
     };                                                                                          \
 }
+
+#define make_simple_error_class_traceable(name)                                                     \
+namespace cfs::error                                                                                \
+{                                                                                                   \
+    class name final : public generalCFSbaseError                                                   \
+    {                                                                                               \
+    public:                                                                                         \
+        explicit name(const std::string & what) : generalCFSbaseError(#name ": " + what, true) { }  \
+        name() : generalCFSbaseError(#name) { }                                                     \
+        ~name() override = default;                                                                 \
+    };                                                                                              \
+}
+
+make_simple_error_class_traceable(assertion_failed);
+#define assert_throw(condition, msg) if (!(condition)) { throw cfs::error::assertion_failed("Assertion `" #condition "` failed: " msg); }
 
 #endif //CFS_REMAKE_GENERAL_CFS_ERROR_H

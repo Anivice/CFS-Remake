@@ -14,13 +14,13 @@ cfs::log::Logger::Logger() noexcept
         ofile.open(log_file, std::ios::out | std::ios::app);
         if (!ofile.is_open())
         {
-            std::cerr << "Unable to open log file " << log_file << ": " << strerror(errno) << std::endl;
+            std::cout << "Unable to open log file " << log_file << ": " << strerror(errno) << std::endl;
             abort();
         }
 
         output = &ofile;
     } else {
-        output = &std::cerr;
+        output = &std::cout;
     }
 
     log_level = 0;

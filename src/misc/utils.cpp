@@ -2,6 +2,7 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include "utils.h"
+#include "generalCFSbaseError.h"
 
 std::string cfs::utils::getenv(const std::string& name) noexcept
 {
@@ -86,8 +87,14 @@ std::pair < const int, const int > cfs::utils::get_screen_col_row() noexcept
     return get_pair();
 }
 
-uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_size, const uint64_t particles) noexcept
+uint64_t cfs::utils::get_timestamp()
 {
+    return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_size, const uint64_t particles)
+{
+    assert_throw(cell_size != 0, "DIV/0");
 #ifdef __x86_64__
     // 50% performance boost bc we used div only once
     uint64_t q, r;
@@ -106,4 +113,36 @@ uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_s
 
     return cells;
 #endif
+}
+
+cfs::utils::arithmetic::CRC64::CRC64()
+{
+    init_crc64();
+}
+
+void cfs::utils::arithmetic::CRC64::update(const uint8_t* data, const size_t length) {
+    for (size_t i = 0; i < length; ++i) {
+        crc64_value = table[(crc64_value ^ data[i]) & 0xFF] ^ (crc64_value >> 8);
+    }
+}
+
+[[nodiscard]] uint64_t cfs::utils::arithmetic::CRC64::get_checksum() const
+{
+    // add the final complement that ECMA‑182 requires
+    return (crc64_value ^ 0xFFFFFFFFFFFFFFFFULL);
+}
+
+void cfs::utils::arithmetic::CRC64::init_crc64()
+{
+    crc64_value = 0xFFFFFFFFFFFFFFFF;
+    for (uint64_t i = 0; i < 256; ++i) {
+        uint64_t crc = i;
+        for (uint64_t j = 8; j--; ) {
+            if (crc & 1)
+                crc = (crc >> 1) ^ 0xC96C5795D7870F42;  // Standard CRC-64 polynomial
+            else
+                crc >>= 1;
+        }
+        table[i] = crc;
+    }
 }

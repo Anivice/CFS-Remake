@@ -2,17 +2,18 @@
 #define CFS_MMAP_H
 
 #include "generalCFSbaseError.h"
+#include <sys/mman.h>
 
 /// Cannot open file
 make_simple_error_class(BasicIOcannotOpenFile);
 
 namespace cfs::basic_io
 {
-
+    /// Map file to address
     class mmap
     {
         int fd = -1;
-        char * data_ = nullptr;
+        void * data_ = MAP_FAILED;
         unsigned long long int size_ = 0;
     public:
         mmap() = default;
@@ -26,8 +27,17 @@ namespace cfs::basic_io
         void open(const std::string & file);
         void close();
 
-        [[nodiscard]] char * data() const { return data_; }
+        /// Get mapped file array
+        /// @return File array
+        [[nodiscard]] char * data() const { return (char*)data_; }
+
+        /// Get array size
+        /// @return array size
         [[nodiscard]] unsigned long long int size() const { return size_; }
+
+        /// Get file descriptor for this disk file
+        /// @return file descriptor for this disk file
+        [[nodiscard]] int get_fd() const { return fd; }
     };
 }
 
