@@ -372,7 +372,11 @@ namespace cfs::log
     std::string strip_func_name(std::string) noexcept;
 }
 
+#ifdef __DEBUG__
 #define logPrint(...)   (void)::cfs::log::cfs_logger.log(cfs::log::prefix_string_t(cfs::color::color(2,3,4) + "(" + cfs::log::strip_func_name(std::source_location::current().function_name()) + ") "), __VA_ARGS__)
+#else
+#define logPrint(...)   (void)::cfs::log::cfs_logger.log(__VA_ARGS__)
+#endif
 #define DEBUG_LOG       (cfs::log::debug_log)
 #define INFO_LOG        (cfs::log::info_log)
 #define WARNING_LOG     (cfs::log::warning_log)

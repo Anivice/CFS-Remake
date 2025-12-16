@@ -20,6 +20,7 @@ static int discard_range(const int fd, const uint64_t offset, const uint64_t len
 void cfs::bitmap_base::init(const uint64_t required_blocks)
 {
     *(uint64_t*)&bytes_required_ = cfs::utils::arithmetic::count_cell_with_cell_size(8, required_blocks);
+    particles_ = required_blocks;
     if (!init_data_array(bytes_required_)) {
         throw cfs::error::bitmap_base_init_data_array_returns_false("Init data array failed");
     }
@@ -27,7 +28,7 @@ void cfs::bitmap_base::init(const uint64_t required_blocks)
 
 bool cfs::bitmap_base::get_bit(const uint64_t index)
 {
-    cfs_assert_simple(index < bytes_required_);
+    cfs_assert_simple(index < particles_);
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
     uint8_t c = 0;
@@ -43,7 +44,7 @@ bool cfs::bitmap_base::get_bit(const uint64_t index)
 
 void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit)
 {
-    cfs_assert_simple(index < bytes_required_);
+    cfs_assert_simple(index < particles_);
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
     uint8_t c = 0x01;

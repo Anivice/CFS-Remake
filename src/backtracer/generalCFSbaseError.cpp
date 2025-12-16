@@ -212,6 +212,8 @@ std::string backtrace()
 
 cfs::error::generalCFSbaseError::generalCFSbaseError(const std::string& msg, bool include_backtrace_msg)
 {
+    message = msg;
+#ifdef __DEBUG__
     message = color::color(5,0,0) + "Error encountered: " + color::color(0,0,0,5,0,0) + msg + color::no_color();
     message += "\n ==> errno: " +
         (errno == 0 ? color::color(0,5,0) : color::color(5,0,0)) + strerror(errno) + color::no_color();
@@ -223,4 +225,5 @@ cfs::error::generalCFSbaseError::generalCFSbaseError(const std::string& msg, boo
         ss << color::color(2,2,2) << "<=== BACKTRACE ENDS ===>" << color::no_color();
         message += ss.str();
     }
+#endif
 }

@@ -4,6 +4,19 @@ set(CMAKE_CXX_STANDARD 23)
 set(CFS_IMPLEMENT_VERSION "0.0.1")
 set(CFS_STANDARD_VERSION "0.0.1")
 include_directories(src/include)
+if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+    add_compile_definitions(__DEBUG__=1)
+endif ()
+
+add_compile_definitions(
+        CFS_IMPLEMENT_VERSION="${CFS_IMPLEMENT_VERSION}"
+        CFS_STANDARD_VERSION="${CFS_STANDARD_VERSION}"
+)
+add_compile_definitions(
+        CFS_IMPLEMENT_VERSION="${CFS_IMPLEMENT_VERSION}"
+        CFS_STANDARD_VERSION="${CFS_STANDARD_VERSION}"
+)
+
 add_library(cfs_obj STATIC
         src/backtracer/generalCFSbaseError.cpp  src/include/generalCFSbaseError.h
         src/misc/color.cpp                      src/include/colors.h
@@ -15,15 +28,6 @@ add_library(cfs_obj STATIC
 )
 add_executable(cfs src/main.cpp)
 target_link_libraries(cfs PRIVATE cfs_obj)
-target_compile_definitions(cfs PUBLIC
-        CFS_IMPLEMENT_VERSION="${CFS_IMPLEMENT_VERSION}"
-        CFS_STANDARD_VERSION="${CFS_STANDARD_VERSION}"
-)
-target_compile_definitions(cfs_obj PUBLIC
-        CFS_IMPLEMENT_VERSION="${CFS_IMPLEMENT_VERSION}"
-        CFS_STANDARD_VERSION="${CFS_STANDARD_VERSION}"
-)
-
 set(UNIT_TESTS "")
 
 # add_unit_test EXECUTABLE_NAME [FILES...]
