@@ -64,126 +64,31 @@ namespace cfs
 
     class block_shared_lock_t {
     public:
-        static constexpr size_t lock_numbers = 4; // 1024 * 16;
+        static constexpr size_t lock_numbers = 1024 * 16;
         static constexpr uint64_t max_map_size = 1024ull * 512ull;
 
     private:
-        std::array < std::mutex, lock_numbers > lock_array_;
-        std::unordered_map < uint64_t /* block ID */, bool /* is allocated ? */ > lock_array_allocate_map_;
-        std::map < uint64_t /* block ID */, uint64_t /* lock ID */ > block_id_to_lock_id_map_;
-        uint64_t last_allocated_position = 0;
-        std::mutex g_lock_array_alloc_dealloc_mtx_;
-
-    public:
-        block_shared_lock_t() {
-            lock_array_allocate_map_.reserve(lock_numbers);
-        }
-
-    private:
-
-        void deallocate_all_unlocked_unblocked()
-        {
-            for (auto && [ lock_id, alloc_status ] : lock_array_allocate_map_)
-            {
-                if (lock_array_[lock_id].try_lock())
-                {
-                    lock_array_[lock_id].unlock();
-                    auto ptr = std::ranges::find_if(block_id_to_lock_id_map_,
-                        [&](const std::pair < uint64_t /* block ID */, uint64_t /* lock ID */ > & pair)->bool {
-                        return pair.second == lock_id;
-                    });
-
-                    if (ptr != block_id_to_lock_id_map_.end()) {
-                        block_id_to_lock_id_map_.erase(ptr);
-                    }
-
-                    alloc_status = false;
-                }
-            }
-        }
-
-        uint64_t allocate_lock_array_unblocked(const uint64_t index)
-        {
-            if (block_id_to_lock_id_map_.size() == lock_numbers)
-            {
-                for (int i = 0; i < 5; i++)
-                {
-                    if (block_id_to_lock_id_map_.size() == lock_numbers) {
-                        deallocate_all_unlocked_unblocked();
-                        std::this_thread::sleep_for(std::chrono::nanoseconds(1l));
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            if (block_id_to_lock_id_map_.size() == lock_numbers) {
-                throw error::no_locks_available();
-            }
-
-            auto try_alloc_lock = [&](const uint64_t try_allocate_loc)->bool
-            {
-                if (try_allocate_loc >= lock_numbers) return false;
-                if (auto & status = lock_array_allocate_map_[try_allocate_loc]) {
-                    return false;
-                } else {
-                    status = true;
-                    return true;
-                }
-            };
-
-            last_allocated_position++;
-            while (!try_alloc_lock(last_allocated_position))
-            {
-                if (last_allocated_position < lock_numbers) {
-                    last_allocated_position++;
-                } else {
-                    last_allocated_position = 0;
-                }
-            }
-
-            block_id_to_lock_id_map_[index] = last_allocated_position;
-            return last_allocated_position;
-        }
+        const uint64_t blocks_ = 0;
+        std::array<std::mutex, lock_numbers> lock_array_;
 
     public:
         void lock(const uint64_t index)
         {
-            // dlog("lock ", index, "\n");
-            std::mutex * mutex = nullptr;
-            {
-                std::lock_guard<std::mutex> lock(g_lock_array_alloc_dealloc_mtx_);
-                const auto ptr = block_id_to_lock_id_map_.find(index);
-                if (ptr == block_id_to_lock_id_map_.end()) {
-                    const auto lock_id = allocate_lock_array_unblocked(index);
-                    mutex = &lock_array_[lock_id];
-                }
-                else {
-                    mutex = &lock_array_[ptr->second];
-                }
-            }
-
-            if (mutex) {
-                mutex->lock();
-            }
-            // dlog("locked ", index, ", map: ", block_id_to_lock_id_map_, "\n");
+            const auto num_per_group = std::max(blocks_ / lock_numbers, 1ul);
+            auto group = index / num_per_group;
+            if (group >= lock_numbers) group = lock_numbers - 1;
+            lock_array_[group].lock();
         }
 
         void unlock(const uint64_t index)
         {
-            std::mutex * mutex = nullptr;
-            {
-                std::lock_guard<std::mutex> lock(g_lock_array_alloc_dealloc_mtx_);
-                const auto ptr = block_id_to_lock_id_map_.find(index);
-                if (ptr != block_id_to_lock_id_map_.end()) {
-                    mutex = &lock_array_[ptr->second];
-                }
-            }
-            if (mutex) {
-                mutex->unlock();
-                // dlog("unlocked ", index, "\n");
-            }
+            const auto num_per_group = std::max(blocks_ / lock_numbers, 1ul);
+            auto group = index / num_per_group;
+            if (group >= lock_numbers) group = lock_numbers - 1;
+            lock_array_[group].unlock();
         }
+
+        friend class filesystem;
     };
 
     constexpr uint64_t cfs_magick_number = 0xCFADBEEF20251216;

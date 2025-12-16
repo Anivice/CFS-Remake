@@ -401,6 +401,7 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
     *(uint64_t*)&cfs_header_block.tailing_header_blk_id_ = static_info_.blocks - 1;
     cfs_header_block.fs_head = header_temp;
     cfs_header_block.fs_end = header_temp_tail;
+    *(uint64_t*)&bitlocker_.blocks_ = static_info_.blocks;
 }
 
 cfs::filesystem::~filesystem()
