@@ -38,6 +38,8 @@ namespace cfs::basic_io
         /// Get file descriptor for this disk file
         /// @return file descriptor for this disk file
         [[nodiscard]] int get_fd() const { return fd; }
+
+        void sync();
     };
 }
 

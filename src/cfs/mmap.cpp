@@ -24,7 +24,7 @@ namespace cfs::basic_io
         }
 
         // Map the entire file into virtual address space
-        data_ = static_cast<char*>(::mmap(nullptr, st.st_size, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0));
+        data_ = static_cast<char*>(::mmap(nullptr, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
 
         if (data_ == MAP_FAILED) {
             throw error::BasicIOcannotOpenFile("mmap failed for file " + file);
@@ -37,8 +37,16 @@ namespace cfs::basic_io
     {
         if (data_ != MAP_FAILED)
         {
-            ::munmap(data_, size_);
+            sync();
+            cfs_assert_simple(::munmap(data_, size_) == 0);
             ::close(fd);
+            data_ = MAP_FAILED;
         }
+    }
+
+    void mmap::sync()
+    {
+        cfs_assert_simple(msync(data_, size_, MS_SYNC) == 0);
+        cfs_assert_simple(fsync(fd) == 0);
     }
 }

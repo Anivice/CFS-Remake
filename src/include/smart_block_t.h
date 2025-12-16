@@ -174,6 +174,9 @@ namespace cfs
     public:
         /// check headers, fix if possible, and create a bit state locker for all blocks
         explicit filesystem(const std::string & path_to_block_file);
+
+        /// flush all data, write clean flag, close file
+        ~filesystem();
     };
 }
 

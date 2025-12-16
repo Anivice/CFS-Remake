@@ -207,6 +207,7 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
 
     // ────── checksum & timestamps ──────
     head.static_info_checksum = head.static_info_checksum_dup = utils::arithmetic::hashcrc64(head.static_info);
+    head.static_info_dup = head.static_info;
 
     const auto now = utils::get_timestamp();
     head.runtime_info.mount_timestamp = head.runtime_info.last_check_timestamp = now;
@@ -291,12 +292,13 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
         close(fd);
     }
     ilog("Discard complete\n");
-    const basic_io::mmap file(path_to_block_file);
+    basic_io::mmap file(path_to_block_file);
     assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
     const auto head = make_head(file.size(), block_size, label);
     std::memcpy(file.data(), &head, sizeof(head)); // head
     std::memcpy(file.data() + file.size() - sizeof(head), &head, sizeof(head)); // tail
     ilog("CFS format complete\n");
+    file.close();
 }
 
 cfs::filesystem::filesystem(const std::string &path_to_block_file)
@@ -312,11 +314,35 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file)
         throw error::not_even_a_cfs_filesystem();
     }
 
+    header_temp->runtime_info_cow = header_temp->runtime_info;
+    header_temp->runtime_info.flags.clean = 0;
+    header_temp->runtime_info.mount_timestamp = utils::get_timestamp();
+    header_temp_tail->runtime_info_cow = header_temp_tail->runtime_info;
+    header_temp_tail->runtime_info = header_temp->runtime_info;
+
     const auto static_info_crc64 = utils::arithmetic::hashcrc64(header_temp->static_info);
     const auto static_info_dup_checksum = utils::arithmetic::hashcrc64(header_temp->static_info_dup);
     std::map < uint64_t, decltype(header_temp->static_info) > static_info_map;
     std::vector < std::pair < uint64_t, decltype(header_temp->static_info) > > static_info_vector;
-    auto push = [&](const uint64_t crc64, const decltype(header_temp->static_info) & info) {
+    bool patch_zeros = false;
+    decltype(static_info_) static_info_patch;
+    auto push = [&](const uint64_t crc64, const decltype(header_temp->static_info) & info)
+    {
+        if (info.block_size == 0 || info.blocks == 0
+            || info.data_bitmap_backup_start == 0
+            || info.data_bitmap_backup_end == 0
+            || info.data_bitmap_start == 0
+            || info.data_bitmap_end == 0
+            || info.data_block_attribute_table_start == 0
+            || info.data_block_attribute_table_end == 0
+            || info.data_table_start == 0
+            || info.data_table_end == 0
+            || info.journal_start == 0
+            || info.journal_end == 0)
+        {
+            patch_zeros = true;
+            return; // ignore obvious faulty ones
+        }
         static_info_map[crc64] = info;
         static_info_vector.emplace_back(crc64, info);
     };
@@ -337,7 +363,8 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file)
         uint64_t most_appeared_crc64 = 0, most_appeared_crc64_count = 0;
         std::ranges::for_each(appearances, [&](const std::pair <uint64_t, uint64_t> & index)
         {
-            if (most_appeared_crc64_count < index.second) {
+            if (most_appeared_crc64_count < index.second)
+            {
                 most_appeared_crc64 = index.first;
                 most_appeared_crc64_count = index.second;
             }
@@ -353,6 +380,7 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file)
             header_temp_tail->static_info_dup           = header_temp->static_info;
             header_temp_tail->static_info_checksum      = header_temp->static_info_checksum;
             header_temp_tail->static_info_checksum_dup  = header_temp->static_info_checksum;
+            static_info_patch = header_temp->static_info;
         }
         else
         {
@@ -360,6 +388,22 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file)
         }
     }
 
+    if (patch_zeros)
+    {
+        if (static_info_map.size() == 1) {
+            static_info_patch = static_info_map.begin()->second;
+        }
+        header_temp->static_info            = static_info_patch;
+        header_temp->static_info_dup        = static_info_patch;
+        header_temp_tail->static_info       = static_info_patch;
+        header_temp_tail->static_info_dup   = static_info_patch;
+    }
+
     static_info_ = header_temp->static_info;
     bitlocker_.create(&file_, header_temp->static_info.block_size);
+}
+
+cfs::filesystem::~filesystem()
+{
+    file_.sync();
 }
