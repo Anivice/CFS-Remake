@@ -167,7 +167,10 @@ std::string backtrace_level_2()
             }
 
             bool meaningful = true;
-            if (!info.file.empty() && info.file.find(__FILE__) != std::string::npos) meaningful = false;
+            std::string source_file = __FILE__;
+            source_file = source_file.substr(0, source_file.find_last_of('.'));
+            source_file = source_file.substr(source_file.find_last_of('/') + 1);
+            if (!info.file.empty() && info.file.find(source_file) != std::string::npos) meaningful = false;
 
             if (meaningful)
             {

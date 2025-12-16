@@ -40,11 +40,13 @@ namespace cfs
 
         /// Create a global bitmap mutex lock state map
         /// @param required_blocks Mutexes required
+        /// @throws cfs::error::bitmap_base_init_data_array_returns_false Init failed
         void init(uint64_t required_blocks);
 
     public:
-        bitmap_base() = default;
-        virtual ~bitmap_base() = default;
+        bitmap_base() noexcept = default;
+        virtual ~bitmap_base() noexcept = default;
+
         bitmap_base(const bitmap_base &) = delete;
         bitmap_base & operator=(const bitmap_base &) = delete;
         bitmap_base(bitmap_base &&) = delete;
@@ -53,12 +55,14 @@ namespace cfs
         /// Get bit at the specific location
         /// @param index Bit Index
         /// @return The bit at the specific location
+        /// @throws cfs::error::assertion_failed Out of bounds
         bool get_bit(uint64_t index);
 
         /// Set the bit at the specific location
         /// @param index Bit Index
         /// @param new_bit The new bit value
         /// @return NONE
+        /// /// @throws cfs::error::assertion_failed Out of bounds
         void set_bit(uint64_t index, bool new_bit);
     };
 
@@ -119,6 +123,8 @@ namespace cfs
     /// @param block_size block size
     /// @param label disk label
     /// @return None
+    /// @throws cfs::error::assertion_failed Can't do basic C operations
+    /// @throws cfs::error::cannot_discard_blocks Cannot discard blocks on block devices
     void make_cfs(const std::string &path_to_block_file, const uint64_t block_size, const std::string & label);
 
     class filesystem
@@ -133,10 +139,14 @@ namespace cfs
                 std::vector <uint8_t> data;
 
             public:
+                /// init bitmap
+                /// @param size bitmap size
+                /// @throws cfs::error::bitmap_base_init_data_array_returns_false (thrown by init())
                 void create(uint64_t size);
             } bitmap;
 
             /// init bitmap
+            /// @throws cfs::error::bitmap_base_init_data_array_returns_false (thrown by bitmap::init())
             void init() { bitmap.create(blocks_); }
             std::mutex bitmap_mtx_;
 
@@ -166,6 +176,7 @@ namespace cfs
             const uint64_t tailing_header_blk_id_ = 0;
             cfs_head_t * fs_head;
             cfs_head_t * fs_end;
+            std::mutex mtx_;
 
         public:
             /// get runtime info from header blocks (both tailing and leading)
@@ -177,8 +188,8 @@ namespace cfs
             void set(const cfs_head_t::runtime_info_t &info);
 
         private:
-            cfs_header_block_t() = default;
-            ~cfs_header_block_t() = default;
+            cfs_header_block_t() noexcept = default;
+            ~cfs_header_block_t() noexcept = default;
 
         public:
             friend class filesystem;
@@ -186,6 +197,10 @@ namespace cfs
 
     public:
         /// check headers, fix if possible, and create a bit state locker for all blocks
+        /// @param path_to_block_file Path to block file
+        /// @throws cfs::error::cannot_even_read_cfs_header_in_that_small_tiny_file Too small
+        /// @throws cfs::error::not_even_a_cfs_filesystem Not CFS
+        /// @throws cfs::error::filesystem_head_corrupt_and_unable_to_recover FS corrupt
         explicit filesystem(const std::string & path_to_block_file);
 
         /// lock guard
@@ -201,6 +216,8 @@ namespace cfs
             /// @param data block data
             /// @param block_address block ID
             /// @param block_size Block size
+            /// @throws cfs::error::block_is_in_use Fail to lock
+            /// @throws cfs::error::assertion_failed out of bounds
             guard(block_shared_lock_t * bitlocker, char * data, const uint64_t block_address, const uint64_t block_size) :
                 bitlocker_(bitlocker), data_(data), block_address_(block_address), block_size_(block_size)
             {
@@ -210,17 +227,16 @@ namespace cfs
             }
 
         public:
-            ~guard() {
-                bitlocker_->unlock(block_address_);
-            }
+            /// @throws cfs::error::assertion_failed out of bounds
+            ~guard() noexcept { bitlocker_->unlock(block_address_); }
 
             /// get the address of the currently locked block page
             /// @return data pointer
-            char * data() const { return data_; }
+            char * data() const noexcept { return data_; }
 
             /// return accessible size
             /// @return accessible size
-            [[nodiscard]] uint64_t size() const { return block_size_; }
+            [[nodiscard]] uint64_t size() const noexcept { return block_size_; }
 
             guard& operator=(const guard&) = delete;
             guard(const guard&) = delete;
@@ -244,6 +260,8 @@ namespace cfs
             /// @param start Region block ID to lock (start)
             /// @param end Region block ID to lock (end)
             /// @param block_size Block size
+            /// @throws cfs::error::block_is_in_use Fail to lock
+            /// @throws cfs::error::assertion_failed out of bounds
             guard_continuous(block_shared_lock_t * bitlocker, char * data, const uint64_t start, const uint64_t end, const uint64_t block_size) :
                 bitlocker_(bitlocker), data_(data), start_(start), end_(end), block_size_(block_size)
             {
@@ -261,6 +279,7 @@ namespace cfs
             }
 
         public:
+            /// @throws cfs::error::assertion_failed out of bounds
             ~guard_continuous()
             {
                 std::lock_guard lock(bitlocker_->bitmap_mtx_);
@@ -271,11 +290,11 @@ namespace cfs
 
             /// get the address of the currently locked block page
             /// @return data pointer
-            char * data() const { return data_; }
+            char * data() const noexcept { return data_; }
 
             /// return accessible size
             /// @return accessible size
-            [[nodiscard]] uint64_t size() const { return (end_ - start_ + 1) * block_size_; }
+            [[nodiscard]] uint64_t size() const noexcept { return (end_ - start_ + 1) * block_size_; }
 
             guard_continuous& operator=(const guard_continuous&) = delete;
             guard_continuous(const guard_continuous&) = delete;
@@ -287,7 +306,10 @@ namespace cfs
         /// Lock a certain block
         /// @param index Block ID to lock
         /// @return lock_guard
-        guard lock(const uint64_t index) {
+        /// @throws cfs::error::assertion_failed Invalid arguments
+        /// @throws cfs::error::block_is_in_use Fail to lock
+        guard lock(const uint64_t index)
+        {
             cfs_assert_simple(index > 0 && index < static_info_.blocks - 1);
             return guard(
                 &this->bitlocker_,
@@ -300,7 +322,10 @@ namespace cfs
         /// @param start Region block ID to lock (start)
         /// @param end Region block ID to lock (end)
         /// @return lock_guard
-        guard_continuous lock(const uint64_t start, const uint64_t end) {
+        /// @throws cfs::error::assertion_failed Invalid arguments
+        /// @throws cfs::error::block_is_in_use Fail to lock
+        guard_continuous lock(const uint64_t start, const uint64_t end)
+        {
             cfs_assert_simple(start > 0 && end < static_info_.blocks - 1 && start < end);
             return guard_continuous(
                 &this->bitlocker_,
@@ -311,7 +336,7 @@ namespace cfs
         }
 
         /// flush all data, write clean flag, close file
-        ~filesystem();
+        ~filesystem() noexcept;
     };
 }
 

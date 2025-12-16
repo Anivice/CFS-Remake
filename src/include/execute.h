@@ -39,7 +39,7 @@ namespace cfs::utils
     /// @param args Arguments
     /// @param input Child's stdin
     /// @return Command's exit status, stdout, and stderr
-    cmd_status exec_command_(const std::string &cmd, const std::vector<std::string> &args, const std::string &input);
+    cmd_status exec_command_(const std::string &cmd, const std::vector<std::string> &args, const std::string &input) noexcept;
 
     /// Execute an external process (template argument wrapper)
     /// @param cmd Full path to executable
@@ -48,7 +48,7 @@ namespace cfs::utils
     /// @return Command's exit status, stdout, and stderr
     /// @example ../../example/execute.cpp
     template <typename... Strings>
-    cmd_status exec_command(const std::string& cmd, const std::string & input = "", Strings &&... args)
+    cmd_status exec_command(const std::string& cmd, const std::string & input = "", Strings &&... args) noexcept
     {
         const std::vector<std::string> vec{std::forward<Strings>(args)...};
         return exec_command_(cmd, vec, input);

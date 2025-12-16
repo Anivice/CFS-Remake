@@ -33,7 +33,7 @@ cfs::log::Logger::Logger() noexcept
     endl_found_in_last_log = true;
 }
 
-std::string cfs::log::strip_func_name(std::string name)
+std::string cfs::log::strip_func_name(std::string name) noexcept
 {
     if (const auto p = name.find('('); p != std::string::npos) {
         name.erase(p);

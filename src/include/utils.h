@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdlib>
 #include <cstdint>
+#include "generalCFSbaseError.h"
 
 /// Utilities
 namespace cfs::utils
@@ -33,24 +34,25 @@ namespace cfs::utils
         /// @param cell_size Cell Size, i.e., particles inside each cell
         /// @param particles Overall particles
         /// @return Cells required to store all particles
+        /// @throws cfs::error::assertion_failed DIV/0
         uint64_t count_cell_with_cell_size(uint64_t cell_size, uint64_t particles);
 
         class CRC64 {
         public:
-            CRC64();
+            CRC64() noexcept;
 
             /// Update CRC64 using new data
             /// @param data New data
             /// @param length New data length
-            void update(const uint8_t* data, size_t length);
+            void update(const uint8_t* data, size_t length) noexcept;
 
             /// Get checksum
-            [[nodiscard]] uint64_t get_checksum() const;
+            [[nodiscard]] uint64_t get_checksum() const noexcept;
 
         private:
             uint64_t crc64_value{};
             uint64_t table[256] {};
-            void init_crc64();
+            void init_crc64() noexcept;
         };
 
         /// Hash a set of data
@@ -58,7 +60,7 @@ namespace cfs::utils
         /// @param length Data length
         /// @return CRC64 checksum of the provided data
         [[nodiscard]] inline
-        uint64_t hashcrc64(const uint8_t * data, const size_t length)
+        uint64_t hashcrc64(const uint8_t * data, const size_t length) noexcept
         {
             CRC64 hash;
             hash.update(data, length);
@@ -73,14 +75,14 @@ namespace cfs::utils
         /// @param data Struct data
         /// @return CRC64 checksum of the provided data
         template < PODType Type >
-        [[nodiscard]] uint64_t hashcrc64(const Type & data) {
+        [[nodiscard]] uint64_t hashcrc64(const Type & data) noexcept {
             return hashcrc64((uint8_t*)&data, sizeof(data));
         }
     }
 
     /// Return current UNIX timestamp
     /// @return Current UNIX timestamp
-    uint64_t get_timestamp();
+    uint64_t get_timestamp() noexcept;
 }
 
 #include "colors.h"

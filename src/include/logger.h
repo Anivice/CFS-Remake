@@ -83,8 +83,8 @@ namespace cfs::log
     template <typename T, typename Tag> struct strong_typedef
     {
         T value;
-        strong_typedef() = default;
-        explicit strong_typedef(T v) : value(std::move(v)) {}
+        strong_typedef() noexcept = default;
+        explicit strong_typedef(T v) noexcept : value(std::move(v)) {}
         T& get() noexcept { return value; }
         [[nodiscard]] const T& get() const noexcept { return value; }
         explicit operator T&() noexcept { return value; }
@@ -96,17 +96,17 @@ namespace cfs::log
 
     template < typename StringType >
     requires (std::is_same_v<StringType, std::string> || std::is_same_v<StringType, std::string_view>)
-    bool _do_i_show_caller_next_time_(const StringType & str)
+    bool _do_i_show_caller_next_time_(const StringType & str) noexcept
     {
         return (!str.empty() && str.back() == '\n');
     }
 
-    inline bool _do_i_show_caller_next_time_(const char * str)
+    inline bool _do_i_show_caller_next_time_(const char * str) noexcept
     {
         return (strlen(str) > 0 && str[strlen(str) - 1] == '\n');
     }
 
-    inline bool _do_i_show_caller_next_time_(const char c)
+    inline bool _do_i_show_caller_next_time_(const char c) noexcept
     {
         return (c == '\n');
     }
@@ -128,13 +128,13 @@ namespace cfs::log
         Logger() noexcept;
 
     private:
-        template <typename ParamType> void _log(const ParamType& param);
+        template <typename ParamType> void _log(const ParamType& param) noexcept;
         template <typename ParamType, typename... Args>
-        void _log(const ParamType& param, const Args&... args);
+        void _log(const ParamType& param, const Args&... args) noexcept;
 
         template <typename Container>
         requires (is_container_v<Container> && !is_map_v<Container> && !is_unordered_map_v<Container>)
-	    void print_container(const Container& container)
+	    void print_container(const Container& container) noexcept
         {
             const bool showing_spaces_back = suggest_showing_spaces;
             if (showing_spaces_back) *output << std::string(container_depth * depth_level, ' ');
@@ -163,7 +163,7 @@ namespace cfs::log
 
 	    template <typename Map>
 	    requires (is_map_v<Map> || is_unordered_map_v<Map>)
-	    void print_container(const Map & map)
+	    void print_container(const Map & map) noexcept
         {
             const bool showing_spaces_back = suggest_showing_spaces;
             if (showing_spaces_back) *output << std::string(container_depth * depth_level, ' ');
@@ -191,22 +191,22 @@ namespace cfs::log
         template<std::size_t N> struct is_char_array<const char[N]> : std::true_type {};
 
         template<std::size_t... Is, class Tuple>
-        constexpr auto tuple_drop_impl(Tuple&& t, std::index_sequence<Is...>) {
+        constexpr auto tuple_drop_impl(Tuple&& t, std::index_sequence<Is...>) noexcept {
             // shift indices by 1 to skip the head
             return std::forward_as_tuple(std::get<Is + 1>(std::forward<Tuple>(t))...);
         }
 
         template<class Tuple>
-        constexpr auto tuple_drop1(Tuple&& t) {
+        constexpr auto tuple_drop1(Tuple&& t) noexcept {
             constexpr std::size_t N = std::tuple_size_v<std::remove_reference_t<Tuple>>;
             static_assert(N > 0, "cannot drop from empty tuple");
             return tuple_drop_impl(std::forward<Tuple>(t), std::make_index_sequence<N - 1>{});
         }
 
-        template <typename T, typename Tag> void _log(const strong_typedef<T, Tag>&) { }
+        template <typename T, typename Tag> void _log(const strong_typedef<T, Tag>&) noexcept { }
 
     public:
-        template <typename... Args> void log(const Args &...args)
+        template <typename... Args> void log(const Args &...args) noexcept
         {
             std::lock_guard lock(log_mutex);
             static_assert(sizeof...(Args) > 0, "log(...) requires at least one argument");
@@ -305,13 +305,13 @@ namespace cfs::log
     } cfs_logger;
 
     template <typename ParamType, typename... Args>
-    void Logger::_log(const ParamType& param, const Args &...args)
+    void Logger::_log(const ParamType& param, const Args &...args) noexcept
     {
         _log(param);
         (_log(args), ...);
     }
 
-    template <typename ParamType> void Logger::_log(const ParamType& param)
+    template <typename ParamType> void Logger::_log(const ParamType& param) noexcept
     {
         // NOLINTBEGIN(clang-diagnostic-repeated-branch-body)
         if constexpr (is_string_v<ParamType>) { // if we don't do it here, it will be assumed as a container
@@ -369,7 +369,7 @@ namespace cfs::log
         // NOLINTEND(clang-diagnostic-repeated-branch-body)
     }
 
-    std::string strip_func_name(std::string);
+    std::string strip_func_name(std::string) noexcept;
 }
 
 #define logPrint(...)   (void)::cfs::log::cfs_logger.log(cfs::log::prefix_string_t(cfs::color::color(2,3,4) + "(" + cfs::log::strip_func_name(std::source_location::current().function_name()) + ") "), __VA_ARGS__)

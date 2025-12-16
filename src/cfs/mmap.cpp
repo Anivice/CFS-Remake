@@ -3,12 +3,21 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "utils.h"
 
 namespace cfs::basic_io
 {
-    mmap::~mmap()
+    mmap::~mmap() noexcept
     {
-        close();
+        try {
+            close();
+        }
+        catch (std::exception & e) {
+            elog(e.what(), "\n");
+        }
+        catch (...) {
+            elog("Cannot sync file\n");
+        }
     }
 
     void mmap::open(const std::string& file)

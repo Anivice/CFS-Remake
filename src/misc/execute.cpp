@@ -53,12 +53,12 @@ int pipes[NUM_PIPES][2];
 #define CHILD_WRITE_FD   ( pipes[PARENT_READ_PIPE][WRITE_FD]  )
 #define CHILD_ERR_FD     ( pipes[PARENT_ERR_PIPE][WRITE_FD]   )
 
-inline std::string get_errno_message(const std::string &prefix = "") {
+inline std::string get_errno_message(const std::string &prefix = "") noexcept {
     return prefix + std::strerror(errno);
 }
 
 cmd_status cfs::utils::exec_command_(const std::string &cmd,
-    const std::vector<std::string> &args, const std::string &input)
+    const std::vector<std::string> &args, const std::string &input) noexcept
 {
     cmd_status status = {"", "", 1}; // Default to failure
 

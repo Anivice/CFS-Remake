@@ -16,29 +16,43 @@ namespace cfs::basic_io
         void * data_ = MAP_FAILED;
         unsigned long long int size_ = 0;
     public:
-        mmap() = default;
+        mmap() noexcept = default;
+
         mmap(const mmap &) = delete;
         mmap(mmap &&) = delete;
         mmap & operator=(const mmap &) = delete;
         mmap & operator=(mmap &&) = delete;
 
+        /// open the file
+        /// @param file path to file
+        /// @throws cfs::error::BasicIOcannotOpenFile Cannot mmap file
         explicit mmap(const std::string & file) { open(file); }
-        ~mmap();
+
+        ~mmap() noexcept;
+
+        /// open the file
+        /// @param file path to file
+        /// @throws cfs::error::BasicIOcannotOpenFile Cannot mmap file
         void open(const std::string & file);
+
+        /// close the file
+        /// @throws cfs::error::assertion_failed Can't sync or unmap
         void close();
 
         /// Get mapped file array
         /// @return File array
-        [[nodiscard]] char * data() const { return (char*)data_; }
+        [[nodiscard]] char * data() const noexcept { return (char*)data_; }
 
         /// Get array size
         /// @return array size
-        [[nodiscard]] unsigned long long int size() const { return size_; }
+        [[nodiscard]] unsigned long long int size() const noexcept { return size_; }
 
         /// Get file descriptor for this disk file
         /// @return file descriptor for this disk file
-        [[nodiscard]] int get_fd() const { return fd; }
+        [[nodiscard]] int get_fd() const noexcept { return fd; }
 
+        /// sync data
+        /// @throws cfs::error::assertion_failed Can't sync or unmap
         void sync();
     };
 }

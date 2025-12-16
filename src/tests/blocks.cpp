@@ -11,7 +11,7 @@ int main(int argc, char ** argv)
         const char * disk = "bigfile.img";
         switch (argc)
         {
-            case 2:
+            case 1:
             {
                 const int fd = open(disk, O_RDWR | O_CREAT);
                 assert_throw(fd > 0, "fd");
@@ -39,7 +39,12 @@ int main(int argc, char ** argv)
                     *lock.data() = c + 1;
                     write(1, ".", 1);
                     i++;
-                } catch (...) {
+                }
+                catch (cfs::error::assertion_failed & e) {
+                    elog(e.what(), "\n");
+                    abort();
+                }
+                catch (...) {
                     // __asm__("nop");
                     std::this_thread::sleep_for(std::chrono::microseconds(10l));
                 }

@@ -27,6 +27,7 @@ void cfs::bitmap_base::init(const uint64_t required_blocks)
 
 bool cfs::bitmap_base::get_bit(const uint64_t index)
 {
+    cfs_assert_simple(index < bytes_required_);
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
     uint8_t c = 0;
@@ -42,6 +43,7 @@ bool cfs::bitmap_base::get_bit(const uint64_t index)
 
 void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit)
 {
+    cfs_assert_simple(index < bytes_required_);
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
     uint8_t c = 0x01;
@@ -116,6 +118,7 @@ bool is_2_power_of(unsigned long long x)
 /// @param block_size Block size
 /// @param label FS label
 /// @return header
+/// @throws cfs::error::invalid_argument
 [[nodiscard]]
 cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, const std::string & label)
 {
@@ -275,7 +278,11 @@ void cfs::filesystem::block_shared_lock_t::bitmap_t::create(const uint64_t size)
             data.resize(bytes, 0);
             data_array_ = data.data();
             return true;
-        } catch (...) {
+        }
+        catch (cfs::error::assertion_failed &) {
+            throw;
+        }
+        catch (...) {
             return false;
         }
     };
@@ -285,39 +292,82 @@ void cfs::filesystem::block_shared_lock_t::bitmap_t::create(const uint64_t size)
 
 cfs::cfs_head_t::runtime_info_t cfs::filesystem::cfs_header_block_t::load()
 {
-    auto blk0 = parent_->lock(0);
-    auto blk_last = parent_->lock(tailing_header_blk_id_);
-    const auto ret = fs_head->runtime_info;
-    return ret;
+    for (int i = 0; i < 5; i++)
+    {
+        try {
+            std::lock_guard<std::mutex> lk(mtx_);
+            auto blk0 = parent_->lock(0);
+            auto blk_last = parent_->lock(tailing_header_blk_id_);
+            const auto ret = fs_head->runtime_info;
+            return ret;
+        }
+        catch (cfs::error::assertion_failed &) {
+            throw;
+        }
+        catch (...) {
+            std::this_thread::sleep_for(std::chrono::microseconds(10l));
+        }
+    }
+
+    throw error::block_is_in_use("Expired after 5 tries");
 }
 
 void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t & info)
 {
-    // first, lock both
-    auto blk0 = parent_->lock(0);
-    auto blk_last = parent_->lock(tailing_header_blk_id_);
+    for (int i = 0; i < 5; i++)
+    {
+        try {
+            std::lock_guard<std::mutex> lk(mtx_);
+            // first, lock both
+            auto blk0 = parent_->lock(0);
+            auto blk_last = parent_->lock(tailing_header_blk_id_);
 
-    // then, cow
-    fs_head->runtime_info_cow = fs_head->runtime_info;
-    fs_end->runtime_info_cow = fs_end->runtime_info;
+            // then, cow
+            fs_head->runtime_info_cow = fs_head->runtime_info;
+            fs_end->runtime_info_cow = fs_end->runtime_info;
 
-    // then, we load in
-    fs_head->runtime_info = info;
-    fs_end->runtime_info = info;
+            // then, we load in
+            fs_head->runtime_info = info;
+            fs_end->runtime_info = info;
+        }
+        catch (cfs::error::assertion_failed &) {
+            throw;
+        }
+        catch (...) {
+            std::this_thread::sleep_for(std::chrono::microseconds(10l));
+        }
+    }
+
+    throw error::block_is_in_use("Expired after 5 tries");
 }
 
 bool cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)
 {
-    std::lock_guard lock(bitmap_mtx_);
-    if (bitmap.get_bit(index)) return false;
-    bitmap.set_bit(index, true);
-    return true;
+    try {
+        std::lock_guard lock(bitmap_mtx_);
+        if (bitmap.get_bit(index)) return false;
+        bitmap.set_bit(index, true);
+        return true;
+    }
+    catch (cfs::error::assertion_failed &) {
+        throw;
+    }
+    catch (...) {
+        return false;
+    }
 }
 
 void cfs::filesystem::block_shared_lock_t::unlock(const uint64_t index)
 {
-    std::lock_guard lock(bitmap_mtx_);
-    bitmap.set_bit(index, false);
+    try {
+        std::lock_guard lock(bitmap_mtx_);
+        bitmap.set_bit(index, false);
+    }
+    catch (cfs::error::assertion_failed &) {
+        throw;
+    }
+    catch (...) {
+    }
 }
 
 cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info_({})
@@ -429,7 +479,11 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
     bitlocker_.init();
 }
 
-cfs::filesystem::~filesystem()
+cfs::filesystem::~filesystem() noexcept
 {
-    file_.sync();
+    try {
+        file_.sync();
+    } catch (std::exception & e) {
+        elog(e.what(), "\n");
+    }
 }

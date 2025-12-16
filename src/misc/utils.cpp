@@ -87,7 +87,7 @@ std::pair < const int, const int > cfs::utils::get_screen_col_row() noexcept
     return get_pair();
 }
 
-uint64_t cfs::utils::get_timestamp()
+uint64_t cfs::utils::get_timestamp() noexcept
 {
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
@@ -115,24 +115,25 @@ uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_s
 #endif
 }
 
-cfs::utils::arithmetic::CRC64::CRC64()
+cfs::utils::arithmetic::CRC64::CRC64() noexcept
 {
     init_crc64();
 }
 
-void cfs::utils::arithmetic::CRC64::update(const uint8_t* data, const size_t length) {
+void cfs::utils::arithmetic::CRC64::update(const uint8_t* data, const size_t length) noexcept
+{
     for (size_t i = 0; i < length; ++i) {
         crc64_value = table[(crc64_value ^ data[i]) & 0xFF] ^ (crc64_value >> 8);
     }
 }
 
-[[nodiscard]] uint64_t cfs::utils::arithmetic::CRC64::get_checksum() const
+[[nodiscard]] uint64_t cfs::utils::arithmetic::CRC64::get_checksum() const noexcept
 {
     // add the final complement that ECMA‑182 requires
     return (crc64_value ^ 0xFFFFFFFFFFFFFFFFULL);
 }
 
-void cfs::utils::arithmetic::CRC64::init_crc64()
+void cfs::utils::arithmetic::CRC64::init_crc64() noexcept
 {
     crc64_value = 0xFFFFFFFFFFFFFFFF;
     for (uint64_t i = 0; i < 256; ++i) {
