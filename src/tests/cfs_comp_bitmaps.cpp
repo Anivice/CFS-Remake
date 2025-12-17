@@ -11,20 +11,15 @@ int main(int argc, char ** argv)
     try
     {
         const char * disk = "bigfile.img";
-        switch (argc)
+        if (argc == 1)
         {
-            case 1:
-            {
-                const int fd = open(disk, O_RDWR | O_CREAT);
-                assert_throw(fd > 0, "fd");
-                assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, cfs::cfs_minimum_size) == 0, "fallocate() failed");
-                assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, cfs::cfs_minimum_size) == 0, "fallocate() failed");
-                close(fd);
-                chmod(disk, 0755);
-                cfs::make_cfs(disk, 512, "test");
-            }
-            break;
-            default: break;
+            const int fd = open(disk, O_RDWR | O_CREAT, 0600);
+            assert_throw(fd > 0, "fd");
+            assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, cfs::cfs_minimum_size) == 0, "fallocate() failed");
+            assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, cfs::cfs_minimum_size) == 0, "fallocate() failed");
+            close(fd);
+            chmod(disk, 0755);
+            cfs::make_cfs(disk, 512, "test");
         }
         cfs::filesystem fs(disk);
         cfs::cfs_journaling_t journal(&fs);
