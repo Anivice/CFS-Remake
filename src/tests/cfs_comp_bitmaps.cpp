@@ -27,7 +27,8 @@ int main(int argc, char ** argv)
             default: break;
         }
         cfs::filesystem fs(disk);
-        cfs::cfs_bitmap_block_mirroring_t raid1_bitmap(&fs);
+        cfs::cfs_journaling_t journal(&fs);
+        cfs::cfs_bitmap_block_mirroring_t raid1_bitmap(&fs, &journal);
         const uint64_t len = fs.static_info_.data_table_end - fs.static_info_.data_table_start;
 
         std::random_device dev, dev2;

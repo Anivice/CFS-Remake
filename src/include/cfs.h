@@ -114,6 +114,18 @@ namespace cfs
         uint64_t reserved;
     };
     static_assert(sizeof(journal_header_t) == cfs_journal_header_size, "Faulty journal header size");
+
+    enum FilesystemActionType : uint64_t {
+        ActionFinishedAndNoExceptionCaughtDuringTheOperation = 0x1000,
+        CorruptionDetected = 0x2000, // [Corruption Type]
+        FilesystemBitmapModification = 0x2010, // [FROM] [TO] [LOCATION]
+        AttemptedFixFinishedAndAssumedFine = 0x2020, // [Corruption Type]
+    };
+
+    enum FilesystemActionParameters : uint64_t {
+        // CorruptionDetected
+        BitmapMirrorInconsistent = 0x2001,
+    };
 }
 
 #endif //CFS_CFS_H

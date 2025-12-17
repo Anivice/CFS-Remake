@@ -111,13 +111,14 @@ uint64_t cfs::cfs_bitmap_singular_t::dump_crc64() const
     return cfs::utils::arithmetic::hashcrc64(data_array_, bytes_required_);
 }
 
-cfs::cfs_bitmap_block_mirroring_t::cfs_bitmap_block_mirroring_t(cfs::filesystem *parent_fs_governor)
+cfs::cfs_bitmap_block_mirroring_t::cfs_bitmap_block_mirroring_t(cfs::filesystem *parent_fs_governor, cfs_journaling_t * journal)
 :
     mirror1(parent_fs_governor->file_.data() + parent_fs_governor->static_info_.data_table_start * parent_fs_governor->static_info_.block_size,
         parent_fs_governor->static_info_.data_table_end - parent_fs_governor->static_info_.data_table_start),
     mirror2(parent_fs_governor->file_.data()+ parent_fs_governor->static_info_.data_bitmap_backup_start * parent_fs_governor->static_info_.block_size,
             parent_fs_governor->static_info_.data_table_end - parent_fs_governor->static_info_.data_table_start),
-    parent_fs_governor_(parent_fs_governor)
+    parent_fs_governor_(parent_fs_governor),
+    journal_(journal)
 {
 }
 
@@ -127,10 +128,40 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
     auto lock = parent_fs_governor_->lock(
         parent_fs_governor_->static_info_.data_bitmap_start,
         parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
-    const auto map1 = mirror1.get_bit(index);
-    const auto map2 = mirror2.get_bit(index);
-    if (map1 != map2) {
+    const auto map1 = mirror1.get_bit(index, false);
+    const auto map2 = mirror2.get_bit(index, false);
+    if (map1 != map2)
+    {
         elog("Filesystem bitmap corrupted at runtime, fsck needed!\n");
+        journal_->push_action(CorruptionDetected, BitmapMirrorInconsistent);
+        const auto header_runtime_lock = parent_fs_governor_->cfs_header_block.make_lock();
+        const auto mirror1_checksum = mirror1.dump_crc64();
+        const auto mirror2_checksum = mirror2.dump_crc64();
+        const auto header_runtime_info = header_runtime_lock.load();
+        if (header_runtime_info.allocation_bitmap_checksum == mirror1_checksum) {
+            std::memcpy(
+                // dest: mirror
+                lock.data() + parent_fs_governor_->static_info_.data_bitmap_end * parent_fs_governor_->static_info_.block_size,
+                // src: non mirror
+                lock.data(),
+                // length: map len
+                (parent_fs_governor_->static_info_.data_bitmap_end - parent_fs_governor_->static_info_.data_bitmap_start) * parent_fs_governor_->static_info_.block_size);
+        } else if (header_runtime_info.allocation_bitmap_checksum == mirror2_checksum) {
+            std::memcpy(
+                // src: non mirror
+                lock.data(),
+                // dest: mirror
+                lock.data() + parent_fs_governor_->static_info_.data_bitmap_end * parent_fs_governor_->static_info_.block_size,
+                // length: map len
+                (parent_fs_governor_->static_info_.data_bitmap_end - parent_fs_governor_->static_info_.data_bitmap_start) * parent_fs_governor_->static_info_.block_size);
+        } else {
+            // both fucked
+            elog("Cannot recover from fatal fault");
+            throw cfs::error::filesystem_head_corrupt_and_unable_to_recover();
+        }
+
+        journal_->push_action(AttemptedFixFinishedAndAssumedFine, BitmapMirrorInconsistent);
+        wlog("Attempted fix finished and assumed fine\n");
     }
 
     return map1;
@@ -138,16 +169,21 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 
 void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool new_bit)
 {
+    const auto original = this->get_bit(index);
+    journal_->push_action(FilesystemBitmapModification, original, new_bit, index);
     // huge multipage state lock
     auto lock = parent_fs_governor_->lock(
         parent_fs_governor_->static_info_.data_bitmap_start,
         parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
-    mirror1.set_bit(index, new_bit);
-    mirror2.set_bit(index, new_bit);
+
+    mirror1.set_bit(index, new_bit, false);
+    mirror2.set_bit(index, new_bit, false);
 
     const auto header_runtime_lock = parent_fs_governor_->cfs_header_block.make_lock();
     auto header_runtime_info = header_runtime_lock.load();
     header_runtime_info.allocation_bitmap_checksum_cow = header_runtime_info.allocation_bitmap_checksum;
     header_runtime_info.allocation_bitmap_checksum = mirror1.dump_crc64();
     header_runtime_lock.set(header_runtime_info);
+
+    journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
 }

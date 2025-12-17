@@ -66,9 +66,10 @@ namespace cfs
         cfs_bitmap_singular_t mirror1;
         cfs_bitmap_singular_t mirror2;
         cfs::filesystem * parent_fs_governor_;
+        cfs_journaling_t * journal_;
 
     public:
-        explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor);
+        explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor, cfs_journaling_t * journal);
 
         /// Get bit at the specific location
         /// @param index Bit Index

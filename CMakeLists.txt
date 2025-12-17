@@ -28,7 +28,7 @@ add_library(cfs_obj STATIC
         src/include/cfs.h
         src/cfs/cfsBasicComponents.cpp          src/include/cfsBasicComponents.h
 )
-add_executable(cfs src/main.cpp)
+add_executable(cfs src/main.cpp src/bin/fsck.cpp)
 target_link_libraries(cfs PRIVATE cfs_obj)
 set(UNIT_TESTS "")
 
