@@ -92,12 +92,9 @@ int main(int argc, char ** argv)
         test_index++;
     });
 
-    if (all_passed) {
-        try {
-            show();
-        } catch (...) {
-            std::cout << "ALL PASSED!" << std::endl;
-        }
+    if (all_passed)
+    {
+        show();
         return EXIT_SUCCESS;
     }
 
