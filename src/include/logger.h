@@ -126,6 +126,7 @@ namespace cfs::log
 
     public:
         Logger() noexcept;
+        ~Logger() noexcept;
 
     private:
         template <typename ParamType> void _log(const ParamType& param) noexcept;

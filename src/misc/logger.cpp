@@ -33,6 +33,15 @@ cfs::log::Logger::Logger() noexcept
     endl_found_in_last_log = true;
 }
 
+cfs::log::Logger::~Logger() noexcept
+{
+    if (!endl_found_in_last_log) {
+        constexpr unsigned char enter_emoji[] = { 0xe2, 0x8f, 0x8e }; // "⏎"
+        output->write(reinterpret_cast<const char *>(enter_emoji), sizeof(enter_emoji));
+        *output << std::endl;
+    }
+}
+
 std::string cfs::log::strip_func_name(std::string name) noexcept
 {
     if (const auto p = name.find('('); p != std::string::npos) {

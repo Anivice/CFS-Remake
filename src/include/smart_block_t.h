@@ -14,6 +14,7 @@
 #include "generalCFSbaseError.h"
 #include "mmap.h"
 #include "utils.h"
+#include "cfs.h"
 
 make_simple_error_class(cannot_even_read_cfs_header_in_that_small_tiny_file)
 make_simple_error_class(not_even_a_cfs_filesystem)
@@ -29,7 +30,7 @@ namespace cfs
     protected:
         uint8_t * data_array_ = nullptr;
         std::mutex array_mtx_;
-        std::atomic<uint64_t> particles_;
+        const uint64_t particles_ = 0;
         const uint64_t bytes_required_ = 0;
 
         /// Initialize `data_array_`
@@ -55,67 +56,15 @@ namespace cfs
         /// @param index Bit Index
         /// @return The bit at the specific location
         /// @throws cfs::error::assertion_failed Out of bounds
-        bool get_bit(uint64_t index);
+        virtual bool get_bit(uint64_t index);
 
         /// Set the bit at the specific location
         /// @param index Bit Index
         /// @param new_bit The new bit value
         /// @return NONE
-        /// /// @throws cfs::error::assertion_failed Out of bounds
-        void set_bit(uint64_t index, bool new_bit);
+        /// @throws cfs::error::assertion_failed Out of bounds
+        virtual void set_bit(uint64_t index, bool new_bit);
     };
-
-    constexpr uint64_t cfs_magick_number = 0xCFADBEEF20251216;
-    constexpr uint64_t cfs_header_size = 512;
-
-    struct cfs_head_t
-    {
-        uint64_t magick; // fs magic
-        struct static_info_t {
-            char label [64];
-            uint64_t block_size;
-            uint64_t blocks; // block numbers
-            uint64_t data_bitmap_start;
-            uint64_t data_bitmap_end;
-            uint64_t data_bitmap_backup_start;
-            uint64_t data_bitmap_backup_end;
-            uint64_t data_block_attribute_table_start; // attribute is 16 byte for each data block
-            uint64_t data_block_attribute_table_end;
-            uint64_t data_table_start;
-            uint64_t data_table_end;
-            uint64_t journal_start;
-            uint64_t journal_end;
-        };
-
-        static_info_t static_info; // static info
-        static_info_t static_info_dup; // static info, dup
-        uint64_t static_info_checksum; // static info checksum
-        uint64_t static_info_checksum_dup; // static info checksum, dup
-
-        struct runtime_info_t {
-            uint64_t mount_timestamp;       // when was the last time it's mounted
-            uint64_t last_check_timestamp;  // last time check ran
-            uint64_t snapshot_number;       // max 127
-            uint64_t snapshot_number_dup;
-            uint64_t snapshot_number_dup2;
-            uint64_t snapshot_number_dup3;
-            struct {
-                uint64_t clean:1;
-            } flags;
-            uint64_t last_allocated_block;
-            uint64_t allocated_blocks;
-        };
-        runtime_info_t runtime_info; // runtime info
-        runtime_info_t runtime_info_cow; // cow of the last change
-        uint64_t runtime_info_checksum; // runtime info
-        uint64_t runtime_info_checksum_cow; // crc64 of cow of the last change
-
-        struct {
-            uint64_t _1;
-        } _reserved_;
-    };
-    static_assert(sizeof(cfs_head_t) == cfs_header_size, "Faulty header size");
-    constexpr uint64_t cfs_minimum_size = 1024 * 1024 * 1;
 
     /// Format a CFS
     /// @param path_to_block_file Disk path
@@ -125,6 +74,8 @@ namespace cfs
     /// @throws cfs::error::assertion_failed Can't do basic C operations
     /// @throws cfs::error::cannot_discard_blocks Cannot discard blocks on block devices
     void make_cfs(const std::string &path_to_block_file, const uint64_t block_size, const std::string & label);
+
+    class cfs_bitmap_block_mirroring_t;
 
     class filesystem
     {
@@ -166,9 +117,10 @@ namespace cfs
     private:
         basic_io::mmap file_;
         block_shared_lock_t bitlocker_;
+
+    public:
         const cfs_head_t::static_info_t static_info_;
 
-    protected:
         class cfs_header_block_t {
         private:
             filesystem * parent_ = nullptr;
@@ -194,7 +146,6 @@ namespace cfs
             friend class filesystem;
         } cfs_header_block;
 
-    public:
         /// check headers, fix if possible, and create a bit state locker for all blocks
         /// @param path_to_block_file Path to block file
         /// @throws cfs::error::cannot_even_read_cfs_header_in_that_small_tiny_file Too small
@@ -278,17 +229,19 @@ namespace cfs
         /// @param index Block ID to lock
         /// @return lock_guard
         /// @throws cfs::error::assertion_failed Invalid arguments
-        guard lock(uint64_t index);
+        [[nodiscard]] guard lock(uint64_t index);
 
         /// Lock a region of blocks
         /// @param start Region block ID to lock (start)
         /// @param end Region block ID to lock (end)
         /// @return lock_guard
         /// @throws cfs::error::assertion_failed Invalid arguments
-        guard_continuous lock(uint64_t start, uint64_t end);
+        [[nodiscard]] guard_continuous lock(uint64_t start, uint64_t end);
 
         /// flush all data, write clean flag, close file
         ~filesystem() noexcept;
+
+        friend class cfs_bitmap_block_mirroring_t;
     };
 }
 

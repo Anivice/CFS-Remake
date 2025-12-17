@@ -20,7 +20,7 @@ static int discard_range(const int fd, const uint64_t offset, const uint64_t len
 void cfs::bitmap_base::init(const uint64_t required_blocks)
 {
     *(uint64_t*)&bytes_required_ = cfs::utils::arithmetic::count_cell_with_cell_size(8, required_blocks);
-    particles_ = required_blocks;
+    *(uint64_t*)&particles_ = required_blocks;
     cfs_assert_simple(init_data_array(bytes_required_));
 }
 
@@ -207,7 +207,7 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
     ilog(color::color(5,5,5), "                JOURNAL REGION │ BLOCK: ", journal_region, "\n");
     ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "       FILE SYSTEM HEAD BACKUP │ BLOCK: ", region_gen(block_offset, block_offset + 1), "\n");
+    ilog(color::color(5,5,5), "       FILE SYSTEM HEAD BACKUP │ BLOCK: ", region_gen(head.static_info.blocks - 1, head.static_info.blocks), "\n");
     ilog("  ─────────────────────────────┴───────────────────────────────────────────────────────────────────────\n");
     ilog("=======================================================================================================\n");
 

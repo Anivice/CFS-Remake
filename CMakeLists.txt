@@ -25,6 +25,8 @@ add_library(cfs_obj STATIC
         src/misc/logger.cpp                     src/include/logger.h
         src/cfs/mmap.cpp                        src/include/mmap.h
         src/cfs/smart_block_t.cpp               src/include/smart_block_t.h
+        src/include/cfs.h
+        src/cfs/cfsBasicComponents.cpp          src/include/cfsBasicComponents.h
 )
 add_executable(cfs src/main.cpp)
 target_link_libraries(cfs PRIVATE cfs_obj)
@@ -107,6 +109,7 @@ enable_testing()
 
 add_unit_test(bitmap src/tests/bitmap.cpp)
 add_unit_test(blocks src/tests/blocks.cpp)
+add_unit_test(cfs_comp_bitmaps src/tests/cfs_comp_bitmaps.cpp)
 
 add_subdirectory(src/imgInTerm)
 add_executable(test_all src/tests/test.cpp)
