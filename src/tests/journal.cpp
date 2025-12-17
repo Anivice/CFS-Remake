@@ -13,7 +13,7 @@ int main(int argc, char ** argv)
         const char * disk = "bigfile.img";
         if (argc == 1)
         {
-            const int fd = open(disk, O_RDWR | O_CREAT);
+            const int fd = open(disk, O_RDWR | O_CREAT, 0600);
             assert_throw(fd > 0, "fd");
             assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, cfs::cfs_minimum_size) == 0, "fallocate() failed");
             assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, cfs::cfs_minimum_size) == 0, "fallocate() failed");
