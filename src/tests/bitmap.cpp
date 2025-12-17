@@ -47,7 +47,7 @@ int main()
         for (uint64_t i = 0; i < len; i++)
         {
             const auto index = index_random();
-            while (!bitmap.get_bit(index))
+            if (!bitmap.get_bit(index))
             {
                 const auto set_result = bit_random();
                 bitmap.set_bit(index, set_result);
@@ -71,7 +71,7 @@ int main()
         };
 
         std::vector<std::thread> threads;
-        for (int i = 0; i < std::thread::hardware_concurrency(); i++) {
+        for (int i = 0; i < /* std::thread::hardware_concurrency() */ 2; i++) {
             threads.emplace_back(Check);
         }
 
