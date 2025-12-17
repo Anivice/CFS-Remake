@@ -60,7 +60,6 @@ int main(int argc, char ** argv)
             pthread_setname_np(pthread_self(), ("T" + std::to_string(index)).c_str());
             for (uint64_t i = 0; i < len; i++)
             {
-                std::lock_guard<std::mutex> lock(reflection_mutex);
                 const auto pos = index_random();
                 const auto set_result = bit_random();
                 raid1_bitmap.set_bit(pos, set_result);
