@@ -45,6 +45,14 @@ int main(int argc, char ** argv)
             raid1_bitmap.set_bit(i, true);
         }
 
+        std::map < uint64_t, bool > reflection2;
+        std::mutex reflection_mutex2;
+        auto set_reflection2 = [&](const uint64_t pos, const bool value)
+        {
+            std::lock_guard<std::mutex> lock(reflection_mutex2);
+            reflection2[pos] = value;
+        };
+
         std::map < uint64_t, bool > reflection;
         std::mutex reflection_mutex;
         auto set_reflection = [&](const uint64_t pos, const bool value)
@@ -62,6 +70,7 @@ int main(int argc, char ** argv)
                 const auto set_result = bit_random();
                 raid1_bitmap.set_bit(pos, set_result);
                 set_reflection(pos, set_result);
+                set_reflection2(pos, set_result);
             }
         };
 
@@ -74,7 +83,7 @@ int main(int argc, char ** argv)
 
         std::ranges::for_each(threads, [](std::thread & T) { if (T.joinable()) T.join(); });
 
-        uint64_t total_positives_in_map = 0, total_positives_in_reflection = 0;
+        uint64_t total_positives_in_map = 0, total_positives_in_reflection = 0, total_positives_in_reflection2 = 0;
         for (auto i = 0ull; i < len; i++) {
             total_positives_in_map += raid1_bitmap.get_bit(i);
         }
@@ -83,7 +92,11 @@ int main(int argc, char ** argv)
             total_positives_in_reflection += val;
         }
 
-        dlog(total_positives_in_map, ", ", total_positives_in_reflection, "\n");
+        for (const auto & val : reflection2 | std::views::values) {
+            total_positives_in_reflection2 += val;
+        }
+
+        dlog(total_positives_in_map, ", ", total_positives_in_reflection, ", ", total_positives_in_reflection2, "\n");
         cfs_assert_simple(total_positives_in_reflection == total_positives_in_map);
     }
     catch (cfs::error::generalCFSbaseError & e) {
