@@ -241,11 +241,11 @@ void show()
 
     try
     {
-        std::ofstream ofile("/tmp/.test_success_png");
+        std::ofstream ofile(".test_success_png");
         ofile.write(reinterpret_cast<char *>(embedded_pic), embedded_pic_len);
         ofile.close();
 
-        cimg_library::CImg<unsigned char> image = load_rgb_CImg("/tmp/.test_success_png", bgColor);
+        cimg_library::CImg<unsigned char> image = load_rgb_CImg(".test_success_png", bgColor);
         if (image.width() > maxWidth || image.height() > maxHeight) {
             // scale image down to fit terminal size
             size new_size = size(image).fitted_within(size(maxWidth, maxHeight));
@@ -259,7 +259,7 @@ void show()
     } catch (...) {
     }
 
-    if (std::filesystem::exists("/tmp/.test_success_png")) {
-        std::filesystem::remove("/tmp/.test_success_png");
+    if (std::filesystem::exists(".test_success_png")) {
+        std::filesystem::remove(".test_success_png");
     }
 }
