@@ -30,6 +30,10 @@ cfs::log::Logger::Logger() noexcept
     filter_level = 1;
 #endif
 
+    const auto env_log_level = utils::getenv("LOG_LEVEL");
+    filter_level = std::strtol(env_log_level.c_str(), nullptr, 10);
+    if (filter_level > 3) filter_level = 3;
+
     endl_found_in_last_log = true;
 }
 
