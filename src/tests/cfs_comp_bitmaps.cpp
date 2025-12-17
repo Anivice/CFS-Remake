@@ -39,11 +39,13 @@ int main(int argc, char ** argv)
             return static_cast<bool>(result(rng_result) & 0x01);
         };
 
+        std::map < uint64_t, bool > reflection;
+
         for (auto i = 0ull; i < len; i++) {
             raid1_bitmap.set_bit(i, true);
+            reflection[i] = true;
         }
 
-        std::map < uint64_t, bool > reflection;
         std::mutex reflection_mutex;
 
         auto T0 = [&](const uint64_t index)
