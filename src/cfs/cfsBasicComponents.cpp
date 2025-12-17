@@ -164,7 +164,7 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
         wlog("Attempted fix finished and assumed fine\n");
     }
 
-    if (const auto ptr = debug_map_.find(index); ptr != debug_map_.end()) cfs_assert_simple(ptr->second == map1);
+    // if (const auto ptr = debug_map_.find(index); ptr != debug_map_.end()) cfs_assert_simple(ptr->second == map1);
 
     return map1;
 }
@@ -178,7 +178,7 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
         parent_fs_governor_->static_info_.data_bitmap_start,
         parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
 
-    debug_map_[index] = new_bit;
+    // debug_map_[index] = new_bit;
 
     mirror1.set_bit(index, new_bit, false);
     mirror2.set_bit(index, new_bit, false);

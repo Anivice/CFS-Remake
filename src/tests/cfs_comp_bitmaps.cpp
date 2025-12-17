@@ -33,20 +33,27 @@ int main(int argc, char ** argv)
         std::mutex random_use_mutex;
 
         auto index_random = [&]->uint64_t {
+            std::lock_guard<std::mutex> lock(random_use_mutex);
             return dist6(rng);
         };
         auto bit_random = [&]->bool {
+            std::lock_guard<std::mutex> lock(random_use_mutex);
             return static_cast<bool>(result(rng_result) & 0x01);
         };
 
         std::map < uint64_t, bool > reflection;
+        std::mutex reflection_mutex;
 
         for (auto i = 0ull; i < len; i++) {
             raid1_bitmap.set_bit(i, true);
             reflection[i] = true;
         }
 
-        std::mutex reflection_mutex;
+        auto set_reflection = [&](const uint64_t index, const bool new_bit)
+        {
+            std::lock_guard<std::mutex> lock(reflection_mutex);
+            reflection[index] = new_bit;
+        };
 
         auto T0 = [&](const uint64_t index)
         {
@@ -57,7 +64,7 @@ int main(int argc, char ** argv)
                 const auto pos = index_random();
                 const auto set_result = bit_random();
                 raid1_bitmap.set_bit(pos, set_result);
-                reflection[pos] = set_result;
+                set_reflection(pos, set_result);
             }
         };
 
@@ -70,7 +77,7 @@ int main(int argc, char ** argv)
 
         std::ranges::for_each(threads, [](std::thread & T) { if (T.joinable()) T.join(); });
 
-        uint64_t total_positives_in_map = 0, total_positives_in_reflection = 0, total_positives_in_reflection2 = 0;
+        uint64_t total_positives_in_map = 0, total_positives_in_reflection = 0 /*, total_positives_in_reflection2 = 0*/;
         for (auto i = 0ull; i < len; i++) {
             total_positives_in_map += raid1_bitmap.get_bit(i);
         }
@@ -79,12 +86,12 @@ int main(int argc, char ** argv)
             total_positives_in_reflection += val;
         }
 
-        for (const auto & val : raid1_bitmap.debug_map_ | std::views::values) {
-            total_positives_in_reflection2 += val;
-        }
+        // for (const auto & val : raid1_bitmap.debug_map_ | std::views::values) {
+            // total_positives_in_reflection2 += val;
+        // }
 
-        dlog(total_positives_in_map, ", ", total_positives_in_reflection, ", ", total_positives_in_reflection2, "\n");
-        cfs_assert_simple(total_positives_in_reflection == total_positives_in_map && total_positives_in_map == total_positives_in_reflection2);
+        dlog(total_positives_in_map, ", ", total_positives_in_reflection, /* ", ", total_positives_in_reflection2, */ "\n");
+        cfs_assert_simple(total_positives_in_reflection == total_positives_in_map /* && total_positives_in_map == total_positives_in_reflection2 */);
     }
     catch (cfs::error::generalCFSbaseError & e) {
         elog(e.what(), "\n");

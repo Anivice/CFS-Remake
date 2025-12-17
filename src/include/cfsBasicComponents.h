@@ -84,7 +84,7 @@ namespace cfs
         /// @throws cfs::error::assertion_failed Out of bounds
         void set_bit(uint64_t index, bool new_bit);
 
-        std::map < uint64_t, bool > debug_map_;
+        // std::map < uint64_t, bool > debug_map_;
     };
 }
 
