@@ -8,6 +8,9 @@ namespace cfs
     constexpr uint64_t cfs_magick_number = 0xCFADBEEF20251216;
     constexpr uint64_t cfs_header_size = 512;
 
+    constexpr auto cfs_implementation_version = CFS_IMPLEMENT_VERSION;
+    constexpr auto cfs_standard_version = CFS_STANDARD_VERSION;
+
     struct cfs_head_t
     {
         uint64_t magick; // fs magic
@@ -82,6 +85,26 @@ namespace cfs
         uint32_t _reserved_:5;
     };
     static_assert(sizeof(cfs_block_attribute_t) == cfs_block_attribute_size, "Faulty attribute size");
+
+    constexpr uint64_t cfs_journal_action_size = 64;
+    struct cfs_action_t
+    {
+        uint64_t cfs_magic;
+        uint64_t action_param_crc64;
+        union
+        {
+            struct action_plain_t
+            {
+                uint64_t action;
+                uint64_t action_param0;
+                uint64_t action_param1;
+                uint64_t action_param2;
+                uint64_t action_param3;
+                uint64_t action_param4;
+            } action_plain;
+        } action_data;
+    };
+    static_assert(sizeof(cfs_action_t) == cfs_journal_action_size, "Faulty journal action size");
 }
 
 #endif //CFS_CFS_H

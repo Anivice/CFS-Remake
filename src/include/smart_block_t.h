@@ -78,6 +78,7 @@ namespace cfs
     void make_cfs(const std::string &path_to_block_file, const uint64_t block_size, const std::string & label);
 
     class cfs_bitmap_block_mirroring_t;
+    class cfs_journaling_t;
 
     class filesystem
     {
@@ -278,6 +279,7 @@ namespace cfs
         NO_COPY_OBJ(filesystem);
 
         friend class cfs_bitmap_block_mirroring_t;
+        friend class cfs_journaling_t;
     };
 }
 
