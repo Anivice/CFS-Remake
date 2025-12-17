@@ -21,9 +21,7 @@ void cfs::bitmap_base::init(const uint64_t required_blocks)
 {
     *(uint64_t*)&bytes_required_ = cfs::utils::arithmetic::count_cell_with_cell_size(8, required_blocks);
     particles_ = required_blocks;
-    if (!init_data_array(bytes_required_)) {
-        throw cfs::error::bitmap_base_init_data_array_returns_false("Init data array failed");
-    }
+    cfs_assert_simple(init_data_array(bytes_required_));
 }
 
 bool cfs::bitmap_base::get_bit(const uint64_t index)
@@ -460,6 +458,99 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
     cfs_header_block.fs_end = header_temp_tail;
     *(uint64_t*)&bitlocker_.blocks_ = static_info_.blocks;
     bitlocker_.init();
+}
+
+cfs::filesystem::guard::guard(
+    block_shared_lock_t *bitlocker,
+    char *data,
+    const uint64_t block_address,
+    const uint64_t block_size)
+    : bitlocker_(bitlocker), data_(data), block_address_(block_address), block_size_(block_size)
+{
+    bitlocker_->lock(block_address_);
+}
+
+cfs::filesystem::guard_continuous::guard_continuous(
+    block_shared_lock_t *bitlocker,
+    char *data,
+    const uint64_t start,
+    const uint64_t end,
+    const uint64_t block_size):
+    bitlocker_(bitlocker), data_(data), start_(start), end_(end), block_size_(block_size)
+{
+    auto try_acquire_all_locks = [&]->std::vector < uint64_t >
+    {
+        std::vector < uint64_t > ret;
+        std::lock_guard lock(bitlocker_->bitmap_mtx_);
+        // bitlocker_->release_block_id_this_time = UINT64_MAX;
+        for (auto i = start; i <= end; i++)
+        {
+            if (bitlocker_->bitmap.get_bit(i)) {
+                ret.push_back(i);
+            }
+        }
+
+        if (ret.empty())
+        {
+            for (auto i = start; i <= end; i++) {
+                bitlocker_->bitmap.set_bit(i, true);
+            }
+        }
+
+        return ret;
+    };
+
+
+    while (true)
+    {
+        auto blocked_list = try_acquire_all_locks();
+        if (blocked_list.empty()) {
+            break;
+        }
+
+        std::unique_lock<std::mutex> lock(bitlocker_->bitmap_mtx_);
+        (void)bitlocker_->cv.wait_for(lock, std::chrono::microseconds(100l), [&]->bool
+        {
+            for (auto i = start; i <= end; i++)
+            {
+                if (bitlocker_->bitmap.get_bit(i)) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+    }
+}
+
+cfs::filesystem::guard_continuous::~guard_continuous()
+{
+    std::lock_guard lock(bitlocker_->bitmap_mtx_);
+    for (auto i = start_; i <= end_; i++) {
+        bitlocker_->bitmap.set_bit(i, false);
+    }
+    bitlocker_->cv.notify_all();
+}
+
+cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
+{
+    cfs_assert_simple(index > 0 && index < static_info_.blocks - 1);
+    return guard(
+        &this->bitlocker_,
+        this->file_.data() + index * static_info_.block_size,
+        index,
+        static_info_.block_size);
+}
+
+cfs::filesystem::guard_continuous cfs::filesystem::lock(const uint64_t start, const uint64_t end)
+{
+    cfs_assert_simple(start > 0 && end < static_info_.blocks - 1 && start < end);
+    return guard_continuous(
+        &this->bitlocker_,
+        this->file_.data() + start * static_info_.block_size,
+        start,
+        end,
+        static_info_.block_size);
 }
 
 cfs::filesystem::~filesystem() noexcept

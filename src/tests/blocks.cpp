@@ -40,7 +40,7 @@ int main(int argc, char ** argv)
                     write(1, ".", 1);
                     i++;
                 }
-                catch (cfs::error::assertion_failed & e) {
+                catch (std::exception & e) {
                     elog(e.what(), "\n");
                     abort();
                 }
