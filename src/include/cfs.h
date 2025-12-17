@@ -36,9 +36,9 @@ namespace cfs
             uint64_t mount_timestamp;       // when was the last time it's mounted
             uint64_t last_check_timestamp;  // last time check ran
             uint64_t snapshot_number;
-            uint64_t snapshot_number_dup;
+            uint64_t snapshot_number_cow;
             uint64_t allocation_bitmap_checksum;
-            uint64_t allocation_bitmap_checksum_dup;
+            uint64_t allocation_bitmap_checksum_cow;
             struct {
                 uint64_t clean:1;
             } flags;

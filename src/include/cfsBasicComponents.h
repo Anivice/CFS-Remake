@@ -20,6 +20,11 @@ namespace cfs {
 
             cfs::bitmap_base::init(data_block_numbers);
         }
+
+        /// get CRC64 of the whole bitmap
+        [[nodiscard]] uint64_t dump_crc64() const {
+            return cfs::utils::arithmetic::hashcrc64(data_array_, bytes_required_);
+        }
     };
 
     class cfs_bitmap_block_mirroring_t
@@ -29,7 +34,7 @@ namespace cfs {
         cfs::filesystem * parent_fs_governor_;
 
     public:
-        cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor)
+        explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor)
             :   mirror1(parent_fs_governor->file_.data() + parent_fs_governor->static_info_.data_table_start * parent_fs_governor->static_info_.block_size,
                 parent_fs_governor->static_info_.data_table_end - parent_fs_governor->static_info_.data_table_start),
                 mirror2(parent_fs_governor->file_.data()+ parent_fs_governor->static_info_.data_bitmap_backup_start * parent_fs_governor->static_info_.block_size,
@@ -70,6 +75,12 @@ namespace cfs {
                 parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
             mirror1.set_bit(index, new_bit);
             mirror2.set_bit(index, new_bit);
+
+            const auto header_runtime_lock = parent_fs_governor_->cfs_header_block.make_lock();
+            auto header_runtime_info = header_runtime_lock.load();
+            header_runtime_info.allocation_bitmap_checksum_cow = header_runtime_info.allocation_bitmap_checksum;
+            header_runtime_info.allocation_bitmap_checksum = mirror1.dump_crc64();
+            header_runtime_lock.set(header_runtime_info);
         }
     };
 }

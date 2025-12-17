@@ -22,6 +22,12 @@ make_simple_error_class(filesystem_head_corrupt_and_unable_to_recover)
 make_simple_error_class(invalid_argument)
 make_simple_error_class(cannot_discard_blocks)
 
+#define NO_COPY_OBJ(name)                                       \
+    name(const name &) = delete;                                \
+    name & operator=(const name &) = delete;                    \
+    name(name &&) = delete;                                     \
+    name & operator=(name &&) = delete;
+
 namespace cfs
 {
     /// bitmap base class
@@ -46,11 +52,7 @@ namespace cfs
     public:
         bitmap_base() noexcept = default;
         virtual ~bitmap_base() noexcept = default;
-
-        bitmap_base(const bitmap_base &) = delete;
-        bitmap_base & operator=(const bitmap_base &) = delete;
-        bitmap_base(bitmap_base &&) = delete;
-        bitmap_base & operator=(bitmap_base &&) = delete;
+        NO_COPY_OBJ(bitmap_base);
 
         /// Get bit at the specific location
         /// @param index Bit Index
@@ -110,6 +112,10 @@ namespace cfs
             /// @param index Block ID index
             void unlock(uint64_t index);
 
+            NO_COPY_OBJ(block_shared_lock_t);
+            block_shared_lock_t() noexcept = default;
+            ~block_shared_lock_t() noexcept = default;
+
             friend class filesystem;
             friend class guard_continuous;
         };
@@ -122,6 +128,9 @@ namespace cfs
         const cfs_head_t::static_info_t static_info_;
 
         class cfs_header_block_t {
+        public:
+            NO_COPY_OBJ(cfs_header_block_t);
+
         private:
             filesystem * parent_ = nullptr;
             const uint64_t tailing_header_blk_id_ = 0;
@@ -129,7 +138,6 @@ namespace cfs
             cfs_head_t * fs_end;
             std::mutex mtx_;
 
-        public:
             /// get runtime info from header blocks (both tailing and leading)
             /// @return Runtime info
             cfs_head_t::runtime_info_t load();
@@ -138,12 +146,44 @@ namespace cfs
             /// @param info New runtime info
             void set(const cfs_head_t::runtime_info_t &info);
 
+            /// lock header mutex
+            void lock() noexcept { mtx_.lock(); }
+
+            /// unlock header mutex
+            void unlock() noexcept { mtx_.unlock(); }
+
+            /// lock helper
+            class smart_lock_header_t {
+            private:
+                cfs_header_block_t * parent_;
+                explicit smart_lock_header_t(cfs_header_block_t * parent) : parent_(parent) { parent_->lock(); }
+
+            public:
+                /// get runtime info from header blocks (both tailing and leading)
+                /// @return Runtime info
+                cfs_head_t::runtime_info_t load() const { return parent_->load(); }
+
+                /// set runtime info to header blocks (both tailing and leading)
+                /// @param info New runtime info
+                void set(const cfs_head_t::runtime_info_t &info) const { parent_->set(info); }
+
+                NO_COPY_OBJ(smart_lock_header_t);
+                ~smart_lock_header_t() { parent_->unlock(); }
+                friend class cfs_header_block_t;
+            };
+
+        public:
+            /// make a smart lock
+            /// @return smart lock
+            [[nodiscard]] smart_lock_header_t make_lock() { return smart_lock_header_t(this); }
+
         private:
             cfs_header_block_t() noexcept = default;
             ~cfs_header_block_t() noexcept = default;
 
         public:
             friend class filesystem;
+            friend class smart_lock_header_t;
         } cfs_header_block;
 
         /// check headers, fix if possible, and create a bit state locker for all blocks
@@ -181,10 +221,7 @@ namespace cfs
             /// @return accessible size
             [[nodiscard]] uint64_t size() const noexcept { return block_size_; }
 
-            guard& operator=(const guard&) = delete;
-            guard(const guard&) = delete;
-            guard& operator=(guard&&) = delete;
-            guard(guard&&) = delete;
+            NO_COPY_OBJ(guard);
             friend class filesystem;
         };
 
@@ -218,10 +255,7 @@ namespace cfs
             /// @return accessible size
             [[nodiscard]] uint64_t size() const noexcept { return (end_ - start_ + 1) * block_size_; }
 
-            guard_continuous& operator=(const guard_continuous&) = delete;
-            guard_continuous(const guard_continuous&) = delete;
-            guard_continuous& operator=(guard_continuous&&) = delete;
-            guard_continuous(guard_continuous&&) = delete;
+            NO_COPY_OBJ(guard_continuous);
             friend class filesystem;
         };
 
@@ -240,6 +274,8 @@ namespace cfs
 
         /// flush all data, write clean flag, close file
         ~filesystem() noexcept;
+
+        NO_COPY_OBJ(filesystem);
 
         friend class cfs_bitmap_block_mirroring_t;
     };

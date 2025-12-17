@@ -1,5 +1,4 @@
 #include "smart_block_t.h"
-#include "smart_block_t.h"
 #include "utils.h"
 #include <errno.h>
 #include <fcntl.h>
@@ -291,7 +290,6 @@ void cfs::filesystem::block_shared_lock_t::bitmap_t::create(const uint64_t size)
 
 cfs::cfs_head_t::runtime_info_t cfs::filesystem::cfs_header_block_t::load()
 {
-    std::lock_guard<std::mutex> lk(mtx_);
     auto blk0 = parent_->lock(0);
     auto blk_last = parent_->lock(tailing_header_blk_id_);
     const auto ret = fs_head->runtime_info;
@@ -300,7 +298,6 @@ cfs::cfs_head_t::runtime_info_t cfs::filesystem::cfs_header_block_t::load()
 
 void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t & info)
 {
-    std::lock_guard<std::mutex> lk(mtx_);
     // first, lock both
     auto blk0 = parent_->lock(0);
     auto blk_last = parent_->lock(tailing_header_blk_id_);
@@ -534,7 +531,7 @@ cfs::filesystem::guard_continuous::~guard_continuous()
 
 cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
 {
-    cfs_assert_simple(index > 0 && index < static_info_.blocks - 1);
+    cfs_assert_simple(index <= static_info_.blocks - 1);
     return guard(
         &this->bitlocker_,
         this->file_.data() + index * static_info_.block_size,
@@ -544,7 +541,7 @@ cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
 
 cfs::filesystem::guard_continuous cfs::filesystem::lock(const uint64_t start, const uint64_t end)
 {
-    cfs_assert_simple(start > 0 && end < static_info_.blocks - 1 && start < end);
+    cfs_assert_simple(end <= static_info_.blocks - 1 && start < end);
     return guard_continuous(
         &this->bitlocker_,
         this->file_.data() + start * static_info_.block_size,
