@@ -124,6 +124,7 @@ add_unit_test(blocks src/tests/blocks.cpp)
 add_unit_test(cfs_comp_bitmaps src/tests/cfs_comp_bitmaps.cpp)
 add_unit_test(journal src/tests/journal.cpp)
 
+set(ZLIB_BUILD_EXAMPLES OFF)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/imgInTerm/libpng/zlib-1.3.1)
 add_library(ZLIB::ZLIB ALIAS zlib)
 set(ZLIB_LOCAL_INC ${CMAKE_SOURCE_DIR}/src/imgInTerm/libpng)
