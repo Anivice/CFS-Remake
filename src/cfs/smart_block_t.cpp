@@ -29,13 +29,13 @@ bool cfs::bitmap_base::get_bit(const uint64_t index, const bool use_mutex)
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
     uint8_t c = 0;
-    if (use_mutex) {
+    // if (use_mutex) {
         std::lock_guard<std::mutex> lock(array_mtx_);
         c = data_array_[q];
-    }
-    else {
-        c = data_array_[q];
-    }
+    // }
+    // else {
+        // c = data_array_[q];
+    // }
 
     c >>= r;
     c &= 0x01;
@@ -62,13 +62,14 @@ void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit, const b
         }
     };
 
-    if (use_mutex)
+    // if (use_mutex)
     {
         std::lock_guard<std::mutex> lock(array_mtx_);
         set();
-    } else {
-        set();
     }
+    // else {
+        // set();
+    // }
 }
 
 namespace solver
