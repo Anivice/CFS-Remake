@@ -110,6 +110,7 @@ enable_testing()
 add_unit_test(bitmap src/tests/bitmap.cpp)
 add_unit_test(blocks src/tests/blocks.cpp)
 add_unit_test(cfs_comp_bitmaps src/tests/cfs_comp_bitmaps.cpp)
+add_unit_test(journal src/tests/journal.cpp)
 
 add_subdirectory(src/imgInTerm)
 add_executable(test_all src/tests/test.cpp)

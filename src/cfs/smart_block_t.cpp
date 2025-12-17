@@ -1,12 +1,12 @@
 #include "smart_block_t.h"
 #include "utils.h"
-#include <errno.h>
+#include <cerrno>
 #include <fcntl.h>
 #include <filesystem>
 #include <linux/fs.h>   // BLKDISCARD, BLKGETSIZE64
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -23,14 +23,17 @@ void cfs::bitmap_base::init(const uint64_t required_blocks)
     cfs_assert_simple(init_data_array(bytes_required_));
 }
 
-bool cfs::bitmap_base::get_bit(const uint64_t index)
+bool cfs::bitmap_base::get_bit(const uint64_t index, const bool use_mutex)
 {
     cfs_assert_simple(index < particles_);
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
     uint8_t c = 0;
-    {
+    if (use_mutex) {
         std::lock_guard<std::mutex> lock(array_mtx_);
+        c = data_array_[q];
+    }
+    else {
         c = data_array_[q];
     }
 
@@ -39,15 +42,16 @@ bool cfs::bitmap_base::get_bit(const uint64_t index)
     return c;
 }
 
-void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit)
+void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit, const bool use_mutex)
 {
     cfs_assert_simple(index < particles_);
     const uint64_t q = index >> 3;
     const uint64_t r = index & 7; // div by 8
     uint8_t c = 0x01;
     c <<= r;
+
+    auto set = [&]
     {
-        std::lock_guard<std::mutex> lock(array_mtx_);
         if (new_bit) // set to true
         {
             data_array_[q] |= c;
@@ -56,6 +60,14 @@ void cfs::bitmap_base::set_bit(const uint64_t index, const bool new_bit)
         {
             data_array_[q] &= ~c;
         }
+    };
+
+    if (use_mutex)
+    {
+        std::lock_guard<std::mutex> lock(array_mtx_);
+        set();
+    } else {
+        set();
     }
 }
 
@@ -170,7 +182,6 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
 
     head.static_info.journal_start = block_offset;
     head.static_info.journal_end   = head.static_info.blocks - 2;
-    block_offset += head.static_info.journal_end - head.static_info.journal_start;
 
     // ────── checksum & timestamps ──────
     head.static_info_checksum = head.static_info_checksum_dup = utils::arithmetic::hashcrc64(head.static_info);
@@ -317,11 +328,11 @@ void cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)
     {
         std::lock_guard lock(bitmap_mtx_);
         // release_block_id_this_time = UINT64_MAX;
-        if (bitmap.get_bit(index)) {
+        if (bitmap.get_bit(index, false)) {
             return false;
         }
 
-        bitmap.set_bit(index, true);
+        bitmap.set_bit(index, true, false);
         return true;
     };
 
@@ -329,7 +340,7 @@ void cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)
     {
         std::unique_lock<std::mutex> lock(bitmap_mtx_);
         (void)cv.wait_for(lock, std::chrono::microseconds(100l),
-            [&]->bool { return !bitmap.get_bit(index); });
+            [&]->bool { return !bitmap.get_bit(index, false); });
     }
 }
 
@@ -337,7 +348,7 @@ void cfs::filesystem::block_shared_lock_t::unlock(const uint64_t index)
 {
     try {
         std::lock_guard lock(bitmap_mtx_);
-        bitmap.set_bit(index, false);
+        bitmap.set_bit(index, false, false);
         // release_block_id_this_time = index;
     }
     catch (cfs::error::assertion_failed &) {
@@ -475,42 +486,33 @@ cfs::filesystem::guard_continuous::guard_continuous(
     const uint64_t block_size):
     bitlocker_(bitlocker), data_(data), start_(start), end_(end), block_size_(block_size)
 {
-    auto try_acquire_all_locks = [&]->std::vector < uint64_t >
+    auto try_acquire_all_locks = [&]->bool
     {
-        std::vector < uint64_t > ret;
         std::lock_guard lock(bitlocker_->bitmap_mtx_);
         // bitlocker_->release_block_id_this_time = UINT64_MAX;
         for (auto i = start; i <= end; i++)
         {
-            if (bitlocker_->bitmap.get_bit(i)) {
-                ret.push_back(i);
+            if (bitlocker_->bitmap.get_bit(i, false)) {
+                return false;
             }
         }
 
-        if (ret.empty())
-        {
-            for (auto i = start; i <= end; i++) {
-                bitlocker_->bitmap.set_bit(i, true);
-            }
+        for (auto i = start; i <= end; i++) {
+            bitlocker_->bitmap.set_bit(i, true, false);
         }
 
-        return ret;
+        return true;
     };
 
 
-    while (true)
+    while (!try_acquire_all_locks())
     {
-        auto blocked_list = try_acquire_all_locks();
-        if (blocked_list.empty()) {
-            break;
-        }
-
         std::unique_lock<std::mutex> lock(bitlocker_->bitmap_mtx_);
         (void)bitlocker_->cv.wait_for(lock, std::chrono::microseconds(100l), [&]->bool
         {
             for (auto i = start; i <= end; i++)
             {
-                if (bitlocker_->bitmap.get_bit(i)) {
+                if (bitlocker_->bitmap.get_bit(i, false)) {
                     return false;
                 }
             }
@@ -532,22 +534,20 @@ cfs::filesystem::guard_continuous::~guard_continuous()
 cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
 {
     cfs_assert_simple(index <= static_info_.blocks - 1);
-    return guard(
-        &this->bitlocker_,
+    return {&this->bitlocker_,
         this->file_.data() + index * static_info_.block_size,
         index,
-        static_info_.block_size);
+        static_info_.block_size};
 }
 
 cfs::filesystem::guard_continuous cfs::filesystem::lock(const uint64_t start, const uint64_t end)
 {
     cfs_assert_simple(end <= static_info_.blocks - 1 && start < end);
-    return guard_continuous(
-        &this->bitlocker_,
+    return {&this->bitlocker_,
         this->file_.data() + start * static_info_.block_size,
         start,
         end,
-        static_info_.block_size);
+        static_info_.block_size};
 }
 
 cfs::filesystem::~filesystem() noexcept

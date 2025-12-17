@@ -105,6 +105,15 @@ namespace cfs
         } action_data;
     };
     static_assert(sizeof(cfs_action_t) == cfs_journal_action_size, "Faulty journal action size");
+
+    constexpr uint64_t cfs_journal_header_size = 32;
+    struct journal_header_t {
+        uint64_t head;
+        uint64_t tail;
+        uint64_t size;
+        uint64_t reserved;
+    };
+    static_assert(sizeof(journal_header_t) == cfs_journal_header_size, "Faulty journal header size");
 }
 
 #endif //CFS_CFS_H

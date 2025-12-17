@@ -58,14 +58,14 @@ namespace cfs
         /// @param index Bit Index
         /// @return The bit at the specific location
         /// @throws cfs::error::assertion_failed Out of bounds
-        virtual bool get_bit(uint64_t index);
+        bool get_bit(uint64_t index, bool use_mutex = true);
 
         /// Set the bit at the specific location
         /// @param index Bit Index
         /// @param new_bit The new bit value
         /// @return NONE
         /// @throws cfs::error::assertion_failed Out of bounds
-        virtual void set_bit(uint64_t index, bool new_bit);
+        void set_bit(uint64_t index, bool new_bit, bool use_mutex = true);
     };
 
     /// Format a CFS
@@ -75,7 +75,7 @@ namespace cfs
     /// @return None
     /// @throws cfs::error::assertion_failed Can't do basic C operations
     /// @throws cfs::error::cannot_discard_blocks Cannot discard blocks on block devices
-    void make_cfs(const std::string &path_to_block_file, const uint64_t block_size, const std::string & label);
+    void make_cfs(const std::string &path_to_block_file, uint64_t block_size, const std::string & label);
 
     class cfs_bitmap_block_mirroring_t;
     class cfs_journaling_t;
@@ -135,8 +135,8 @@ namespace cfs
         private:
             filesystem * parent_ = nullptr;
             const uint64_t tailing_header_blk_id_ = 0;
-            cfs_head_t * fs_head;
-            cfs_head_t * fs_end;
+            cfs_head_t * fs_head = nullptr;
+            cfs_head_t * fs_end = nullptr;
             std::mutex mtx_;
 
             /// get runtime info from header blocks (both tailing and leading)
@@ -162,7 +162,7 @@ namespace cfs
             public:
                 /// get runtime info from header blocks (both tailing and leading)
                 /// @return Runtime info
-                cfs_head_t::runtime_info_t load() const { return parent_->load(); }
+                [[nodiscard]] cfs_head_t::runtime_info_t load() const { return parent_->load(); }
 
                 /// set runtime info to header blocks (both tailing and leading)
                 /// @param info New runtime info
@@ -216,7 +216,7 @@ namespace cfs
 
             /// get the address of the currently locked block page
             /// @return data pointer
-            char * data() const noexcept { return data_; }
+            [[nodiscard]] char * data() const noexcept { return data_; }
 
             /// return accessible size
             /// @return accessible size
@@ -250,7 +250,7 @@ namespace cfs
 
             /// get the address of the currently locked block page
             /// @return data pointer
-            char * data() const noexcept { return data_; }
+            [[nodiscard]] char * data() const noexcept { return data_; }
 
             /// return accessible size
             /// @return accessible size
