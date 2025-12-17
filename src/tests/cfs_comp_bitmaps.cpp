@@ -33,11 +33,9 @@ int main(int argc, char ** argv)
         std::mutex random_use_mutex;
 
         auto index_random = [&]->uint64_t {
-            std::lock_guard<std::mutex> lock(random_use_mutex);
             return dist6(rng);
         };
         auto bit_random = [&]->bool {
-            std::lock_guard<std::mutex> lock(random_use_mutex);
             return static_cast<bool>(result(rng_result) & 0x01);
         };
 
@@ -45,32 +43,19 @@ int main(int argc, char ** argv)
             raid1_bitmap.set_bit(i, true);
         }
 
-        std::map < uint64_t, bool > reflection2;
-        std::mutex reflection_mutex2;
-        auto set_reflection2 = [&](const uint64_t pos, const bool value)
-        {
-            std::lock_guard<std::mutex> lock(reflection_mutex2);
-            reflection2[pos] = value;
-        };
-
         std::map < uint64_t, bool > reflection;
         std::mutex reflection_mutex;
-        auto set_reflection = [&](const uint64_t pos, const bool value)
-        {
-            std::lock_guard<std::mutex> lock(reflection_mutex);
-            reflection[pos] = value;
-        };
 
         auto T0 = [&](const uint64_t index)
         {
             pthread_setname_np(pthread_self(), ("T" + std::to_string(index)).c_str());
             for (uint64_t i = 0; i < len; i++)
             {
+                std::lock_guard<std::mutex> lock(reflection_mutex);
                 const auto pos = index_random();
                 const auto set_result = bit_random();
                 raid1_bitmap.set_bit(pos, set_result);
-                set_reflection(pos, set_result);
-                set_reflection2(pos, set_result);
+                reflection[pos] = set_result;
             }
         };
 
