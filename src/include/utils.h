@@ -88,5 +88,6 @@ namespace cfs::utils
 #include "colors.h"
 #include "execute.h"
 #include "logger.h"
+#include "args.h"
 
 #endif //CFS_UTILS_H

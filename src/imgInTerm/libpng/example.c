@@ -41,7 +41,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <png.h>
-#include <zlib.h>
+#include "zlib-1.3.1/zlib.h"
 
 int main(int argc, const char **argv)
 {

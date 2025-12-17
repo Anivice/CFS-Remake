@@ -3,11 +3,28 @@
 #include "generalCFSbaseError.h"
 #include "utils.h"
 
+namespace utils = cfs::utils;
+
+utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
+    { .short_name = 'h', .long_name = "help", .argument_required = false, .description = "Show help" },
+    { .short_name = 'v', .long_name = "version", .argument_required = false, .description = "Show version" },
+};
+
 int main(int argc, char** argv)
 {
     try
     {
-        dlog(cfs::utils::arithmetic::count_cell_with_cell_size(4, 9), "\n");
+        const utils::PreDefinedArgumentType PreDefinedArguments(MainArgument);
+        utils::ArgumentParser ArgumentParser(argc, argv, PreDefinedArguments);
+        const auto parsed = ArgumentParser.parse();
+        if (parsed.contains("help")) {
+            std::cout << *argv << " [Arguments [OPTIONS...]...]" << std::endl;
+            std::cout << PreDefinedArguments.print_help();
+        }
+
+        if (parsed.contains("version")) {
+            std::cout << *argv << std::endl;
+        }
     }
     catch (cfs::error::generalCFSbaseError & e) {
         elog(e.what(), "\n");

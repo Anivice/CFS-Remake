@@ -55,7 +55,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <zlib.h>
+#include "zlib-1.3.1/zlib.h"
 
 #include "png.h"        /* libpng header */
 #include "readpng.h"    /* typedefs, common macros, public prototypes */

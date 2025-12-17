@@ -144,7 +144,7 @@
 #  include "../../png.h"
 #endif
 
-#include <zlib.h>
+#include "zlib-1.3.1/zlib.h"
 
 /* Work round for GCC complaints about casting a (double) function result to
  * an unsigned:

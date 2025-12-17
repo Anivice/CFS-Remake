@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
-#include <zlib.h>
+#include "zlib-1.3.1/zlib.h"
 
 /* application includes */
 
