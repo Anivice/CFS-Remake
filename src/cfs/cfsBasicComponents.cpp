@@ -164,6 +164,8 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
         wlog("Attempted fix finished and assumed fine\n");
     }
 
+    if (const auto ptr = debug_map_.find(index); ptr != debug_map_.end()) cfs_assert_simple(ptr->second == map1);
+
     return map1;
 }
 
