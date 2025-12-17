@@ -44,10 +44,6 @@ int main(int argc, char ** argv)
                     elog(e.what(), "\n");
                     abort();
                 }
-                catch (...) {
-                    // __asm__("nop");
-                    std::this_thread::sleep_for(std::chrono::microseconds(10l));
-                }
             }
 
             ++counter;

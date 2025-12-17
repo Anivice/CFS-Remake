@@ -10,6 +10,7 @@
 #include <memory>
 #include <thread>
 #include <map>
+#include <condition_variable>
 #include "generalCFSbaseError.h"
 #include "mmap.h"
 #include "utils.h"
@@ -20,7 +21,6 @@ make_simple_error_class(not_even_a_cfs_filesystem)
 make_simple_error_class(filesystem_head_corrupt_and_unable_to_recover)
 make_simple_error_class(invalid_argument)
 make_simple_error_class(cannot_discard_blocks)
-make_simple_error_class(block_is_in_use);
 
 namespace cfs
 {
@@ -149,12 +149,12 @@ namespace cfs
             /// @throws cfs::error::bitmap_base_init_data_array_returns_false (thrown by bitmap::init())
             void init() { bitmap.create(blocks_); }
             std::mutex bitmap_mtx_;
+            std::condition_variable cv;
 
         public:
             /// lock by index
             /// @param index Block ID index
-            /// @return If lock succeeded, it returns true, else it returns false
-            bool lock(uint64_t index);
+            void lock(uint64_t index);
 
             /// unlock by index
             /// @param index Block ID index
@@ -216,14 +216,11 @@ namespace cfs
             /// @param data block data
             /// @param block_address block ID
             /// @param block_size Block size
-            /// @throws cfs::error::block_is_in_use Fail to lock
             /// @throws cfs::error::assertion_failed out of bounds
             guard(block_shared_lock_t * bitlocker, char * data, const uint64_t block_address, const uint64_t block_size) :
                 bitlocker_(bitlocker), data_(data), block_address_(block_address), block_size_(block_size)
             {
-                if (!bitlocker_->lock(block_address_)) {
-                    throw error::block_is_in_use();
-                }
+                bitlocker_->lock(block_address_);
             }
 
         public:
@@ -260,21 +257,60 @@ namespace cfs
             /// @param start Region block ID to lock (start)
             /// @param end Region block ID to lock (end)
             /// @param block_size Block size
-            /// @throws cfs::error::block_is_in_use Fail to lock
             /// @throws cfs::error::assertion_failed out of bounds
             guard_continuous(block_shared_lock_t * bitlocker, char * data, const uint64_t start, const uint64_t end, const uint64_t block_size) :
                 bitlocker_(bitlocker), data_(data), start_(start), end_(end), block_size_(block_size)
             {
-                std::lock_guard lock(bitlocker_->bitmap_mtx_);
-                for (auto i = start; i <= end; i++)
+                auto try_acquire_all_locks = [&]->std::vector < uint64_t >
                 {
-                    if (bitlocker_->bitmap.get_bit(i)) {
-                        throw error::block_is_in_use();
+                    std::vector < uint64_t > ret;
+                    std::lock_guard lock(bitlocker_->bitmap_mtx_);
+                    // bitlocker_->release_block_id_this_time = UINT64_MAX;
+                    for (auto i = start; i <= end; i++)
+                    {
+                        if (bitlocker_->bitmap.get_bit(i)) {
+                            ret.push_back(i);
+                        }
                     }
-                }
 
-                for (auto i = start; i <= end; i++) {
-                    bitlocker_->bitmap.set_bit(i, true);
+                    if (ret.empty())
+                    {
+                        for (auto i = start; i <= end; i++) {
+                            bitlocker_->bitmap.set_bit(i, true);
+                        }
+                    }
+
+                    return ret;
+                };
+
+
+                while (true)
+                {
+                    auto blocked_list = try_acquire_all_locks();
+                    if (blocked_list.empty()) {
+                        break;
+                    }
+
+                    std::unique_lock<std::mutex> lock(bitlocker_->bitmap_mtx_);
+                    (void)bitlocker_->cv.wait_for(lock, std::chrono::microseconds(10l), [&]->bool
+                    {
+                        // dlog("Notified with ", bitlocker_->release_block_id_this_time, ", asking for ", blocked_list, "\n");
+                        // if (const auto ptr =
+                            // std::ranges::find(blocked_list, bitlocker_->release_block_id_this_time);
+                            // ptr != blocked_list.end())
+                        // {
+                            // blocked_list.erase(ptr);
+                        // }
+                        // return blocked_list.empty(); // empty (true) means good, no blocked calls
+                        for (auto i = start; i <= end; i++)
+                        {
+                            if (bitlocker_->bitmap.get_bit(i)) {
+                                return false;
+                            }
+                        }
+
+                        return true;
+                    });
                 }
             }
 
@@ -307,7 +343,6 @@ namespace cfs
         /// @param index Block ID to lock
         /// @return lock_guard
         /// @throws cfs::error::assertion_failed Invalid arguments
-        /// @throws cfs::error::block_is_in_use Fail to lock
         guard lock(const uint64_t index)
         {
             cfs_assert_simple(index > 0 && index < static_info_.blocks - 1);
@@ -323,7 +358,6 @@ namespace cfs
         /// @param end Region block ID to lock (end)
         /// @return lock_guard
         /// @throws cfs::error::assertion_failed Invalid arguments
-        /// @throws cfs::error::block_is_in_use Fail to lock
         guard_continuous lock(const uint64_t start, const uint64_t end)
         {
             cfs_assert_simple(start > 0 && end < static_info_.blocks - 1 && start < end);

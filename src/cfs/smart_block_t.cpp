@@ -293,68 +293,48 @@ void cfs::filesystem::block_shared_lock_t::bitmap_t::create(const uint64_t size)
 
 cfs::cfs_head_t::runtime_info_t cfs::filesystem::cfs_header_block_t::load()
 {
-    for (int i = 0; i < 5; i++)
-    {
-        try {
-            std::lock_guard<std::mutex> lk(mtx_);
-            auto blk0 = parent_->lock(0);
-            auto blk_last = parent_->lock(tailing_header_blk_id_);
-            const auto ret = fs_head->runtime_info;
-            return ret;
-        }
-        catch (cfs::error::assertion_failed &) {
-            throw;
-        }
-        catch (...) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10l));
-        }
-    }
-
-    throw error::block_is_in_use("Expired after 5 tries");
+    std::lock_guard<std::mutex> lk(mtx_);
+    auto blk0 = parent_->lock(0);
+    auto blk_last = parent_->lock(tailing_header_blk_id_);
+    const auto ret = fs_head->runtime_info;
+    return ret;
 }
 
 void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t & info)
 {
-    for (int i = 0; i < 5; i++)
-    {
-        try {
-            std::lock_guard<std::mutex> lk(mtx_);
-            // first, lock both
-            auto blk0 = parent_->lock(0);
-            auto blk_last = parent_->lock(tailing_header_blk_id_);
+    std::lock_guard<std::mutex> lk(mtx_);
+    // first, lock both
+    auto blk0 = parent_->lock(0);
+    auto blk_last = parent_->lock(tailing_header_blk_id_);
 
-            // then, cow
-            fs_head->runtime_info_cow = fs_head->runtime_info;
-            fs_end->runtime_info_cow = fs_end->runtime_info;
+    // then, cow
+    fs_head->runtime_info_cow = fs_head->runtime_info;
+    fs_end->runtime_info_cow = fs_end->runtime_info;
 
-            // then, we load in
-            fs_head->runtime_info = info;
-            fs_end->runtime_info = info;
-        }
-        catch (cfs::error::assertion_failed &) {
-            throw;
-        }
-        catch (...) {
-            std::this_thread::sleep_for(std::chrono::microseconds(10l));
-        }
-    }
-
-    throw error::block_is_in_use("Expired after 5 tries");
+    // then, we load in
+    fs_head->runtime_info = info;
+    fs_end->runtime_info = info;
 }
 
-bool cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)
+void cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)
 {
-    try {
+    auto try_acquire_lock = [&]->bool
+    {
         std::lock_guard lock(bitmap_mtx_);
-        if (bitmap.get_bit(index)) return false;
+        // release_block_id_this_time = UINT64_MAX;
+        if (bitmap.get_bit(index)) {
+            return false;
+        }
+
         bitmap.set_bit(index, true);
         return true;
-    }
-    catch (cfs::error::assertion_failed &) {
-        throw;
-    }
-    catch (...) {
-        return false;
+    };
+
+    while (!try_acquire_lock())
+    {
+        std::unique_lock<std::mutex> lock(bitmap_mtx_);
+        (void)cv.wait_for(lock, std::chrono::microseconds(100l),
+            [&]->bool { return !bitmap.get_bit(index); });
     }
 }
 
@@ -363,12 +343,14 @@ void cfs::filesystem::block_shared_lock_t::unlock(const uint64_t index)
     try {
         std::lock_guard lock(bitmap_mtx_);
         bitmap.set_bit(index, false);
+        // release_block_id_this_time = index;
     }
     catch (cfs::error::assertion_failed &) {
         throw;
     }
     catch (...) {
     }
+    cv.notify_all();
 }
 
 cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info_({})

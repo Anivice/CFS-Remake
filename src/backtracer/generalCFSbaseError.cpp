@@ -210,7 +210,7 @@ std::string backtrace()
     }
 }
 
-cfs::error::generalCFSbaseError::generalCFSbaseError(const std::string& msg, bool include_backtrace_msg)
+cfs::error::generalCFSbaseError::generalCFSbaseError(const std::string& msg, const bool include_backtrace_msg)
 {
     message = msg;
 #ifdef __DEBUG__
