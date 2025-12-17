@@ -92,12 +92,12 @@ int main(int argc, char ** argv)
             total_positives_in_reflection += val;
         }
 
-        for (const auto & val : reflection2 | std::views::values) {
+        for (const auto & val : raid1_bitmap.debug_map_ | std::views::values) {
             total_positives_in_reflection2 += val;
         }
 
         dlog(total_positives_in_map, ", ", total_positives_in_reflection, ", ", total_positives_in_reflection2, "\n");
-        cfs_assert_simple(total_positives_in_reflection == total_positives_in_map);
+        cfs_assert_simple(total_positives_in_reflection == total_positives_in_map && total_positives_in_map == total_positives_in_reflection2);
     }
     catch (cfs::error::generalCFSbaseError & e) {
         elog(e.what(), "\n");

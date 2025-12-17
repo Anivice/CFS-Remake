@@ -176,6 +176,8 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
         parent_fs_governor_->static_info_.data_bitmap_start,
         parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
 
+    debug_map_[index] = new_bit;
+
     mirror1.set_bit(index, new_bit, false);
     mirror2.set_bit(index, new_bit, false);
 
