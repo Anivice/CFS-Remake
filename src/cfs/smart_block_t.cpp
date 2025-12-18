@@ -250,11 +250,7 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
                     continue;
                 }
 
-                std::vector<char> buffer;
-                buffer.resize(256, 0);
-                sprintf(buffer.data(), "discard failed at off=%llu len=%llu",
-                        static_cast<unsigned long long>(off), static_cast<unsigned long long>(len));
-                throw error::cannot_discard_blocks(std::string(buffer.data()));
+                throw error::cannot_discard_blocks("discard failed at off=", off, " len=", len);
             }
             off += len;
         }

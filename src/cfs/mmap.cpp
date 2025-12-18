@@ -24,19 +24,19 @@ namespace cfs::basic_io
     {
         fd = ::open(file.c_str(), O_RDWR);
         if (fd == -1) {
-            throw error::BasicIOcannotOpenFile("invalid fd returned by ::open(\"" + file + "\", O_RDWR)");
+            throw error::BasicIOcannotOpenFile("invalid fd returned by ::open(\"", file, "\", O_RDWR)");
         }
 
         struct stat st = { };
         if (fstat(fd, &st) == -1) {
-            throw error::BasicIOcannotOpenFile("fstat failed for file " + file);
+            throw error::BasicIOcannotOpenFile("fstat failed for file ", file);
         }
 
         // Map the entire file into virtual address space
         data_ = static_cast<char*>(::mmap(nullptr, st.st_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0));
 
         if (data_ == MAP_FAILED) {
-            throw error::BasicIOcannotOpenFile("mmap failed for file " + file);
+            throw error::BasicIOcannotOpenFile("mmap failed for file ", file);
         }
 
         size_ = st.st_size;

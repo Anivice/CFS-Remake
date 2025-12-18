@@ -1,5 +1,7 @@
 extern void show();
-int main() {
+
+int main()
+{
     show();
     return 0;
 }

@@ -76,7 +76,7 @@ std::string cfs::utils::ParsedArgumentType::at(const char c) const
         }
     }
 
-    throw cfs::error::no_such_argument("Argument '" + std::string(1, c) + "' not found.");
+    throw cfs::error::no_such_argument("Argument '", c, "' not found.");
 }
 
 std::string cfs::utils::ParsedArgumentType::at(const std::string &str) const
@@ -87,7 +87,7 @@ std::string cfs::utils::ParsedArgumentType::at(const std::string &str) const
         }
     }
 
-    throw cfs::error::no_such_argument("Argument '" + str + "' not found.");
+    throw cfs::error::no_such_argument("Argument '", str, "' not found.");
 }
 
 cfs::utils::ArgumentParser::ArgumentParser(const int argc, char **argv, const PreDefinedArgumentType & PreDefinedArgs)
@@ -117,8 +117,7 @@ cfs::utils::ArgumentParser::ArgumentParser(const int argc, char **argv, const Pr
             }
         }
 
-        throw error::no_such_argument("Unknown argument '" +
-            (arg.short_name > 0 ? std::string(1, arg.short_name) : arg.long_name) + "'.");
+        throw error::no_such_argument("Unknown argument '", (arg.short_name > 0 ? std::string(1, arg.short_name) : arg.long_name), "'.");
     };
 
     for (int i = 1; i < argc; i++)
@@ -134,10 +133,10 @@ cfs::utils::ArgumentParser::ArgumentParser(const int argc, char **argv, const Pr
         if (fill_missing(arg_parsed))
         {
             i++;
-            if (i >= argc) throw error::argument_parser_exception("Argument '" + arg + "' requires a parameter but was never provided");
+            if (i >= argc) throw error::argument_parser_exception("Argument '", arg, "' requires a parameter but was never provided");
             const std::string param = argv[i];
             if (!param.empty() && param.front() == '-') {
-                throw error::argument_parser_exception("Argument '" + arg + "' requires a parameter but was never provided");
+                throw error::argument_parser_exception("Argument '", arg, "' requires a parameter but was never provided");
             }
 
             arg_parsed.parameter = param;

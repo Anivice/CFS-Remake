@@ -1,8 +1,85 @@
 cmake_minimum_required(VERSION 3.20)
 project(CFS C CXX)
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_C_STANDARD 23)
 set(CFS_IMPLEMENT_VERSION "0.0.1")
 set(CFS_STANDARD_VERSION "0.0.1")
+
+# USE_ADDITIONAL_FLAGS                   - Use additional compiler and linker flags for release builds
+# NCURSES_CONFIGURE_ADDITIONAL_FLAGS     - ncurses additional configuration flags
+# NCURSES_MAKE_ADDITIONAL_FLAGS          - ncurses additional make build flags
+# NCURSES_MAKE_INSTALL_ADDITIONAL_FLAGS  - ncurses additional make install flags
+# READLINE_MAKE_ADDITIONAL_FLAGS         - readline additional configuration flags
+# READLINE_CONFIGURE_ADDITIONAL_FLAGS    - readline additional make build flags
+# READLINE_MAKE_INSTALL_ADDITIONAL_FLAGS - readline additional make install flags
+# CC_ADDITIONAL_OPTIONS                  - Use additional compiler flags for release builds
+# LD_ADDITIONAL_OPTIONS                  - Use additional linker flags for release builds
+# DEBUG_TIV_SHOW                         - Generate instance for debugging void show()
+
+# readline only supports Makefile
+find_program(MAKE_EXECUTABLE NAMES make gmake REQUIRED)
+include(ExternalProject)
+set(NCURSES_MAKE_ENTIRE "${MAKE_EXECUTABLE} ${NCURSES_MAKE_ADDITIONAL_FLAGS}")
+message(STATUS "NCRUSES: ${NCURSES_MAKE_ENTIRE}")
+ExternalProject_Add(NCURSES
+        PREFIX              ${CMAKE_CURRENT_BINARY_DIR}/ncurses
+        SOURCE_DIR          ${CMAKE_SOURCE_DIR}/src/NonCMake/ncurses-6.5
+        INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/ncurses/install
+        CONFIGURE_COMMAND   <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> ${NCURSES_CONFIGURE_ADDITIONAL_FLAGS}
+        BUILD_COMMAND       /bin/sh -c "${NCURSES_MAKE_ENTIRE}"
+        INSTALL_COMMAND     ${MAKE_EXECUTABLE} install ${NCURSES_MAKE_INSTALL_ADDITIONAL_FLAGS}
+        INSTALL_BYPRODUCTS  <INSTALL_DIR>/lib/libncursesw.a
+        TEST_COMMAND        ""
+        INACTIVITY_TIMEOUT  15
+        CONFIGURE_HANDLED_BY_BUILD ON
+)
+
+ExternalProject_Get_Property(NCURSES INSTALL_DIR)
+set(NCURSES_INCLUDE_DIR "${INSTALL_DIR}/include")
+set(NCURSES_LIB_DIR     "${INSTALL_DIR}/lib")
+file(MAKE_DIRECTORY "${NCURSES_INCLUDE_DIR}" "${NCURSES_LIB_DIR}")
+
+# Export to CMake
+add_library(ncurses::ncurses UNKNOWN IMPORTED)
+set_target_properties(ncurses::ncurses PROPERTIES
+        IMPORTED_LOCATION             "${NCURSES_LIB_DIR}/libncursesw.a" # <= ncurses lib location
+        INTERFACE_INCLUDE_DIRECTORIES "${NCURSES_INCLUDE_DIR}"
+)
+add_dependencies(ncurses::ncurses NCURSES)
+include_directories("${NCURSES_INCLUDE_DIR}/ncursesw")
+include_directories("${NCURSES_INCLUDE_DIR}")
+set(READLINE_MAKE_ENTIRE "${MAKE_EXECUTABLE} ${READLINE_MAKE_ADDITIONAL_FLAGS}")
+message(STATUS "READLINE: ${READLINE_MAKE_ENTIRE}")
+ExternalProject_Add(READLINE
+        PREFIX              ${CMAKE_CURRENT_BINARY_DIR}/readline
+        SOURCE_DIR          ${CMAKE_SOURCE_DIR}/src/NonCMake/readline-8.3
+        INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/readline/install
+        CONFIGURE_COMMAND   <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> --with-curses ${READLINE_CONFIGURE_ADDITIONAL_FLAGS}
+        BUILD_COMMAND       /bin/sh -c "${READLINE_MAKE_ENTIRE}"
+        INSTALL_COMMAND     ${MAKE_EXECUTABLE} install ${READLINE_MAKE_INSTALL_ADDITIONAL_FLAGS}
+        INSTALL_BYPRODUCTS  <INSTALL_DIR>/lib/libhistory.a <INSTALL_DIR>/lib/libreadline.a <INSTALL_DIR>/lib/libreadline.so <INSTALL_DIR>/lib/libhistory.so
+        TEST_COMMAND        ""
+        INACTIVITY_TIMEOUT  15
+        CONFIGURE_HANDLED_BY_BUILD ON
+)
+
+ExternalProject_Get_Property(READLINE INSTALL_DIR)
+set(READLINE_INCLUDE_DIR "${INSTALL_DIR}/include")
+set(READLINE_LIB_DIR     "${INSTALL_DIR}/lib")
+file(MAKE_DIRECTORY "${READLINE_INCLUDE_DIR}" "${READLINE_LIB_DIR}")
+
+# Export to CMake
+add_library(readline::readline UNKNOWN IMPORTED)
+set_target_properties(readline::readline PROPERTIES
+        IMPORTED_LOCATION               "${READLINE_LIB_DIR}/libhistory.a"
+        IMPORTED_LOCATION               "${READLINE_LIB_DIR}/libreadline.a"
+        INTERFACE_INCLUDE_DIRECTORIES   "${READLINE_INCLUDE_DIR}"
+)
+add_dependencies(readline::readline READLINE)
+add_dependencies(READLINE NCURSES)
+include_directories("${READLINE_INCLUDE_DIR}/readline")
+include_directories("${READLINE_INCLUDE_DIR}")
+
 include_directories(src/include)
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     add_compile_definitions(__DEBUG__=1)
@@ -29,14 +106,17 @@ add_library(cfs_obj STATIC                      src/include/cfs.h
         src/cfs/cfsBasicComponents.cpp          src/include/cfsBasicComponents.h
         src/misc/args.cpp                       src/include/args.h
 )
+target_link_libraries(cfs_obj PUBLIC atomic)
+
 add_executable(cfs src/main.cpp src/bin/fsck.cpp ${CMAKE_BINARY_DIR}/version.cpp)
-target_link_libraries(cfs PRIVATE cfs_obj)
+target_link_libraries(cfs PRIVATE cfs_obj ncurses::ncurses readline::readline atomic)
 
 find_program(XXD_EXEC xxd)
 add_custom_target(version_cpp ALL
         COMMAND     /bin/sh -c "\"${XXD_EXEC}\" -i -n version_text < \"${CMAKE_SOURCE_DIR}\"/src/res/version.txt > \"${CMAKE_BINARY_DIR}\"/version.cpp"
         COMMENT     "Generate version.cpp..."
         BYPRODUCTS  "${CMAKE_BINARY_DIR}/version.cpp"
+        DEPENDS     ${CMAKE_SOURCE_DIR}/src/res/version.txt
         VERBATIM
 )
 
@@ -80,7 +160,7 @@ else ()
     if ("${USE_ADDITIONAL_FLAGS}" STREQUAL "True")
         string(REPLACE " " ";" CC_ADDITIONAL_OPTIONS_LIST "${CC_ADDITIONAL_OPTIONS}")
         string(REPLACE " " ";" LD_ADDITIONAL_OPTIONS_LIST "${LD_ADDITIONAL_OPTIONS}")
-        target_compile_options(cfs PUBLIC
+        set(compile_args
                 -O3
                 # -flto
                 -fomit-frame-pointer
@@ -94,8 +174,8 @@ else ()
                 -s
                 ${CC_ADDITIONAL_OPTIONS_LIST}
         )
-        target_link_options(cfs PUBLIC
-                -static-libgcc -static-libstdc++
+        set(link_args
+                # -static-libgcc -static-libstdc++
                 -O3
                 # -flto
                 -fomit-frame-pointer
@@ -110,11 +190,13 @@ else ()
                 -s
                 ${LD_ADDITIONAL_OPTIONS_LIST}
         )
+
+        target_compile_options(cfs PUBLIC ${compile_args})
+        target_link_options(cfs PUBLIC ${link_args})
+
+        target_compile_options(cfs_obj PUBLIC ${compile_args})
+        target_link_options(cfs_obj PUBLIC ${link_args})
     endif ()
-    target_link_libraries(cfs PRIVATE atomic)
-    set_target_properties(cfs PROPERTIES LINK_SEARCH_START_STATIC 1)
-    set_target_properties(cfs PROPERTIES LINK_SEARCH_END_STATIC 1)
-    set(CMAKE_FIND_LIBRARY_SUFFIXES ".a")
 endif ()
 
 enable_testing()
@@ -142,4 +224,5 @@ endforeach ()
 if("${DEBUG_TIV_SHOW}" STREQUAL "True")
     add_executable(show src/tests/show.cpp)
     target_link_libraries(show PRIVATE tiv)
+    add_dependencies(test_all show)
 endif ()

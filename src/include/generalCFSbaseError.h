@@ -3,6 +3,8 @@
 
 #include <stdexcept>
 #include <string>
+#include <sstream>
+#include "utils.h"
 
 namespace cfs::error
 {
@@ -21,25 +23,47 @@ namespace cfs::error
 #define make_simple_error_class(name)                                                           \
 namespace cfs::error                                                                            \
 {                                                                                               \
-    class name final : public generalCFSbaseError                                               \
-    {                                                                                           \
+    class name final : public generalCFSbaseError {                                             \
+    private:                                                                                    \
+        template < typename Type >                                                              \
+        void msg_conj(const Type & msg) { oss << msg; }                                         \
+                                                                                                \
+        std::ostringstream oss;                                                                 \
+                                                                                                \
     public:                                                                                     \
-        explicit name(const std::string & what) : generalCFSbaseError(#name ": " + what) { }    \
+        template <typename... Args>                                                             \
+        explicit name(const Args& ...args) : generalCFSbaseError("<INSERT ERROR MESSAGE HERE>") \
+        {                                                                                       \
+            msg_conj(#name ": ");                                                               \
+            (msg_conj(args), ...);                                                              \
+            cfs::utils::replace_all(message, "<INSERT ERROR MESSAGE HERE>", oss.str());         \
+        }                                                                                       \
         name() : generalCFSbaseError(#name) { }                                                 \
         ~name() override = default;                                                             \
     };                                                                                          \
 }
 
-#define make_simple_error_class_traceable(name)                                                     \
-namespace cfs::error                                                                                \
-{                                                                                                   \
-    class name final : public generalCFSbaseError                                                   \
-    {                                                                                               \
-    public:                                                                                         \
-        explicit name(const std::string & what) : generalCFSbaseError(#name ": " + what, true) { }  \
-        name() : generalCFSbaseError(#name) { }                                                     \
-        ~name() override = default;                                                                 \
-    };                                                                                              \
+#define make_simple_error_class_traceable(name)                                                         \
+namespace cfs::error                                                                                    \
+{                                                                                                       \
+    class name final : public generalCFSbaseError {                                                     \
+    private:                                                                                            \
+        template < typename Type >                                                                      \
+        void msg_conj(const Type & msg) { oss << msg; }                                                 \
+                                                                                                        \
+        std::ostringstream oss;                                                                         \
+                                                                                                        \
+    public:                                                                                             \
+        template <typename... Args>                                                                     \
+        explicit name(const Args& ...args) : generalCFSbaseError("<INSERT ERROR MESSAGE HERE>", true)   \
+        {                                                                                               \
+            msg_conj(#name ": ");                                                                       \
+            (msg_conj(args), ...);                                                                      \
+            cfs::utils::replace_all(message, "<INSERT ERROR MESSAGE HERE>", oss.str());                 \
+        }                                                                                               \
+        name() : generalCFSbaseError(#name, true) { }                                                   \
+        ~name() override = default;                                                                     \
+    };                                                                                                  \
 }
 
 make_simple_error_class_traceable(assertion_failed);

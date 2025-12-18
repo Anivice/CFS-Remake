@@ -2,6 +2,8 @@
 #include "colors.h"
 #include "generalCFSbaseError.h"
 #include "utils.h"
+#include "args.h"
+#include "cfs.h"
 
 namespace utils = cfs::utils;
 
@@ -20,10 +22,14 @@ int main(int argc, char** argv)
         if (parsed.contains("help")) {
             std::cout << *argv << " [Arguments [OPTIONS...]...]" << std::endl;
             std::cout << PreDefinedArguments.print_help();
+            return EXIT_SUCCESS;
         }
 
         if (parsed.contains("version")) {
             std::cout << *argv << std::endl;
+            std::cout.write(reinterpret_cast<const char *>(version_text), version_text_len);
+            std::cout << std::endl;
+            return EXIT_SUCCESS;
         }
     }
     catch (cfs::error::generalCFSbaseError & e) {

@@ -4,7 +4,6 @@
 #include <string>
 #include <cstdlib>
 #include <cstdint>
-#include "generalCFSbaseError.h"
 
 /// Utilities
 namespace cfs::utils
@@ -88,6 +87,5 @@ namespace cfs::utils
 #include "colors.h"
 #include "execute.h"
 #include "logger.h"
-#include "args.h"
 
 #endif //CFS_UTILS_H

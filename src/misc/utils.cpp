@@ -106,11 +106,7 @@ uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_s
 //     if (r != 0) return q + 1;
 //     else return q;
 // #else
-    const uint64_t cells = particles / cell_size;
-    if (const uint64_t reminder = particles % cell_size; reminder != 0) {
-        return cells + 1;
-    }
-
+    const uint64_t cells = particles / cell_size + (particles % cell_size == 0 ? 0 : 1);
     return cells;
 // #endif
 }

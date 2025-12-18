@@ -1,0 +1,11 @@
+CFS Version 0.0.1
+
+CFS, or Copy-on-write File System, is a tiny filesystem that is meant to
+illustrate copy-on-write mechanics serving as a proof-of-concept.
+Current implementation is done using C++ and FUSE, though a commandline-only
+utility is also provided to manipulate on-disk filesystem without FUSE.
+
+CFS is under GPLv3 due to its use of readline and ncurses.
+
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
