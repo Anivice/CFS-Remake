@@ -138,3 +138,8 @@ add_dependencies(test_all ${UNIT_TESTS})
 foreach (test ${UNIT_TESTS})
     message(STATUS ${test})
 endforeach ()
+
+if("${DEBUG_TIV_SHOW}" STREQUAL "True")
+    add_executable(show src/tests/show.cpp)
+    target_link_libraries(show PRIVATE tiv)
+endif ()
