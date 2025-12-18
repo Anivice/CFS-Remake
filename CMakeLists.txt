@@ -90,10 +90,7 @@ add_compile_definitions(
         CFS_STANDARD_VERSION="${CFS_STANDARD_VERSION}"
 )
 
-execute_process(
-        COMMAND ${CMAKE_COMMAND} -E touch "${CMAKE_BINARY_DIR}/version.cpp"
-        WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
-)
+file(TOUCH "${CMAKE_BINARY_DIR}/version.cpp")
 
 add_library(cfs_obj STATIC                      src/include/cfs.h
         src/backtracer/generalCFSbaseError.cpp  src/include/generalCFSbaseError.h
@@ -108,8 +105,23 @@ add_library(cfs_obj STATIC                      src/include/cfs.h
 )
 target_link_libraries(cfs_obj PUBLIC atomic)
 
-add_executable(cfs src/main.cpp src/bin/fsck.cpp ${CMAKE_BINARY_DIR}/version.cpp)
+add_executable(cfs src/main.cpp ${CMAKE_BINARY_DIR}/version.cpp
+        src/include/routes.h src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp)
 target_link_libraries(cfs PRIVATE cfs_obj ncurses::ncurses readline::readline atomic)
+
+function(add_link LINK)
+    add_custom_target(utility_links_${LINK} ALL
+            DEPENDS cfs
+            COMMAND ${CMAKE_COMMAND} -E create_symlink cfs ${LINK}.cfs
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Creating utility link ${LINK}"
+            BYPRODUCTS ${LINK}.cfs
+    )
+endfunction()
+
+add_link(fsck)
+add_link(mkfs)
+add_link(mount)
 
 find_program(XXD_EXEC xxd)
 add_custom_target(version_cpp ALL

@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "args.h"
 #include "cfs.h"
+#include "routes.h"
 
 namespace utils = cfs::utils;
 
@@ -16,6 +17,32 @@ int main(int argc, char** argv)
 {
     try
     {
+        auto basename = [](const std::string & name)->std::string
+        {
+            if (const auto pos = name.find_last_of('/');
+                pos != std::string::npos)
+            {
+                return name.substr(pos + 1);
+            }
+            return name;
+        };
+
+        const auto route = basename(argv[0]);
+
+        if (route == "fsck.cfs") {
+            return fsck_main(argc, argv);
+        }
+
+        if (route == "mount.cfs") {
+            return mount_main(argc, argv);
+        }
+
+        if (route == "mkfs.route") {
+            return mkfs_main(argc, argv);
+        }
+
+        /// No routes detected, utility mode
+        ilog("CFS utility version " CFS_IMPLEMENT_VERSION " (standard revision number " CFS_STANDARD_VERSION ")\n");
         const utils::PreDefinedArgumentType PreDefinedArguments(MainArgument);
         utils::ArgumentParser ArgumentParser(argc, argv, PreDefinedArguments);
         const auto parsed = ArgumentParser.parse();
