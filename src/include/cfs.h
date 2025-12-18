@@ -128,7 +128,4 @@ namespace cfs
     };
 }
 
-extern unsigned char version_text[];
-extern unsigned int version_text_len;
-
 #endif //CFS_CFS_H

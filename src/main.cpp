@@ -11,6 +11,7 @@
 #include "readline.h"
 #include "history.h"
 #include "smart_block_t.h"
+#include "version.h"
 
 namespace utils = cfs::utils;
 

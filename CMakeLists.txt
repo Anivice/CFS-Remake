@@ -90,7 +90,29 @@ add_compile_definitions(
         CFS_STANDARD_VERSION="${CFS_STANDARD_VERSION}"
 )
 
-file(TOUCH "${CMAKE_BINARY_DIR}/version.cpp")
+find_program(XXD_EXEC xxd   REQUIRED)
+find_program(SED_EXEC sed   REQUIRED)
+find_program(GREP_EXEC grep REQUIRED)
+find_program(CAT_EXEC cat   REQUIRED)
+function(generate_from_resource_file RES SRC_FILE HEADER XXD_NAME)
+    add_custom_command(
+            OUTPUT      "${CMAKE_BINARY_DIR}/${SRC_FILE}"
+            COMMAND     /bin/sh -c "\"${XXD_EXEC}\" -i -n ${XXD_NAME} < \"${CMAKE_SOURCE_DIR}\"/src/res/${RES} \
+                            > \"${CMAKE_BINARY_DIR}\"/${SRC_FILE} && \"${CAT_EXEC}\" \"${CMAKE_BINARY_DIR}\"/${SRC_FILE} | \
+                            \"${GREP_EXEC}\" unsigned | \"${SED_EXEC}\" -E 's/(unsigned.*)=.*/extern \\1;/g' \
+                            | \"${SED_EXEC}\" -E 's/(.*)\\s(.*)\\\[\\\](.*)/\\1 * \\2 \\3/g'
+                            > \"${CMAKE_BINARY_DIR}\"/${HEADER}"
+            COMMENT     "Generating ${SRC_FILE}..."
+            DEPENDS     ${CMAKE_SOURCE_DIR}/src/res/${RES}
+            VERBATIM
+    )
+
+    file(TOUCH "${CMAKE_BINARY_DIR}/${SRC_FILE}")
+    file(TOUCH "${CMAKE_BINARY_DIR}/${HEADER}")
+endfunction()
+
+generate_from_resource_file(version.txt version.cpp version.h version_text)
+generate_from_resource_file(cfs.command.readline cfs_command.cpp cfs_command.h cfs_command_source)
 
 add_library(cfs_obj STATIC                      src/include/cfs.h
         src/backtracer/generalCFSbaseError.cpp  src/include/generalCFSbaseError.h
@@ -105,9 +127,12 @@ add_library(cfs_obj STATIC                      src/include/cfs.h
 )
 target_link_libraries(cfs_obj PUBLIC atomic)
 
-add_executable(cfs src/main.cpp ${CMAKE_BINARY_DIR}/version.cpp
+add_executable(cfs src/main.cpp
+        ${CMAKE_BINARY_DIR}/version.cpp         ${CMAKE_BINARY_DIR}/version.h
+        ${CMAKE_BINARY_DIR}/cfs_command.cpp     ${CMAKE_BINARY_DIR}/cfs_command.h
         src/include/routes.h src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp)
 target_link_libraries(cfs PRIVATE cfs_obj ncurses::ncurses readline::readline atomic)
+target_include_directories(cfs PRIVATE ${CMAKE_BINARY_DIR})
 
 function(add_link LINK)
     add_custom_target(utility_links_${LINK} ALL
@@ -122,15 +147,6 @@ endfunction()
 add_link(fsck)
 add_link(mkfs)
 add_link(mount)
-
-find_program(XXD_EXEC xxd)
-add_custom_target(version_cpp ALL
-        COMMAND     /bin/sh -c "\"${XXD_EXEC}\" -i -n version_text < \"${CMAKE_SOURCE_DIR}\"/src/res/version.txt > \"${CMAKE_BINARY_DIR}\"/version.cpp"
-        COMMENT     "Generate version.cpp..."
-        BYPRODUCTS  "${CMAKE_BINARY_DIR}/version.cpp"
-        DEPENDS     ${CMAKE_SOURCE_DIR}/src/res/version.txt
-        VERBATIM
-)
 
 set(UNIT_TESTS "")
 
