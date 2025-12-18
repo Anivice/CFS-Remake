@@ -281,7 +281,7 @@ namespace cfs::log
                 default: prefix = color::color(5,5,5) + "[INFO]"; break;
                 }
 
-                _log(color::color(0, 2, 2), std::format("{:%d-%m-%Y %H:%M:%S}", now), " ",
+                _log(color::color(0, 2, 2), std::format("{:%Y-%m-%d %H:%M:%S}", now), " ",
                     user_prefix_addon,
                     prefix, ": ", color::no_color());
             }

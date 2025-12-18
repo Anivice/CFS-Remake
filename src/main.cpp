@@ -9,8 +9,8 @@
 namespace utils = cfs::utils;
 
 utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
-    { .short_name = 'h', .long_name = "help", .argument_required = false, .description = "Show help" },
-    { .short_name = 'v', .long_name = "version", .argument_required = false, .description = "Show version" },
+    { .short_name = 'h', .long_name = "help",       .argument_required = false, .description = "Show help" },
+    { .short_name = 'v', .long_name = "version",    .argument_required = false, .description = "Show version" },
 };
 
 int main(int argc, char** argv)

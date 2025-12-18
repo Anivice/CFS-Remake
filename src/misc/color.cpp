@@ -7,11 +7,18 @@
 #include "colors.h"
 #include "utils.h"
 
+bool cfs::color::g_color_disabled_since_output_is_not_terminal = false;
+
 bool cfs::color::is_no_color() noexcept
 {
     static std::atomic_int is_no_color_cache = -1;
     if (is_no_color_cache != -1) {
         return is_no_color_cache;
+    }
+
+    if (g_color_disabled_since_output_is_not_terminal) {
+        is_no_color_cache = true;
+        return true;
     }
 
     auto color_env = cfs::utils::getenv("COLOR");

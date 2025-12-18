@@ -19,6 +19,7 @@ cfs::log::Logger::Logger() noexcept
         }
 
         output = &ofile;
+        color::g_color_disabled_since_output_is_not_terminal = true;
     } else {
         output = &std::cout;
     }
