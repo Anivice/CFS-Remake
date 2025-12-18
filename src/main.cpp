@@ -12,6 +12,7 @@
 #include "history.h"
 #include "smart_block_t.h"
 #include "version.h"
+#include "cfs_command.h"
 
 namespace utils = cfs::utils;
 
@@ -38,6 +39,15 @@ struct frame_t {
     NodeType * entry_ = nullptr;
     CurrentStatusType status_ = NoOperation;
 };
+
+std::string gen_cmd(const unsigned char * src, const unsigned int len)
+{
+    std::vector<char> data;
+    data.resize(len + 1, 0);
+    std::memcpy(data.data(), src, len);
+    std::string ret = data.data();
+    return ret;
+}
 
 class Readline {
 private:
@@ -190,13 +200,13 @@ private:
     };
 public:
 
-    argumentTree_t argumentTree =
-        " { "
-        "   < command (Help text): < subcommand1 (Help text2): verb1, <subcommand1.1: verb1>, verb2, verb3 >, "
-        "              < subcommand2: verb1 >, "
-        "   >, # comments are ignored util '\\n'\n"
-        "   < command2 (Help text3 ): [HSP], [CFSP] > "
-        " } ";
+    argumentTree_t argumentTree = gen_cmd(cfs_command_source, cfs_command_source_len);
+        // " { "
+        // "   < command (Help text): < subcommand1 (Help text2): verb1, <subcommand1.1: verb1>, verb2, verb3 >, "
+        // "              < subcommand2: verb1 >, "
+        // "   >, # comments are ignored util '\\n'\n"
+        // "   < command2 (Help text3 ): [HSP], [CFSP] > "
+        // " } ";
 };
 
 void print_line(const NodeType * entry, const int depth)
@@ -267,6 +277,8 @@ int main(int argc, char** argv)
             std::cout << std::endl;
             return EXIT_SUCCESS;
         }
+
+        auto c = *cfs_command_source;
 
         Readline readline;
         print_line(&readline.argumentTree.root, 0);

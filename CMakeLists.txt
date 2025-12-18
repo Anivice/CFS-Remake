@@ -95,15 +95,15 @@ find_program(SED_EXEC sed   REQUIRED)
 find_program(GREP_EXEC grep REQUIRED)
 find_program(CAT_EXEC cat   REQUIRED)
 function(generate_from_resource_file RES SRC_FILE HEADER XXD_NAME)
+    set(_in   "${CMAKE_SOURCE_DIR}/src/res/${RES}")
+    set(_outc "${CMAKE_BINARY_DIR}/${SRC_FILE}")
+    set(_outh "${CMAKE_BINARY_DIR}/${HEADER}")
+
     add_custom_command(
-            OUTPUT      "${CMAKE_BINARY_DIR}/${SRC_FILE}"
-            COMMAND     /bin/sh -c "\"${XXD_EXEC}\" -i -n ${XXD_NAME} < \"${CMAKE_SOURCE_DIR}\"/src/res/${RES} \
-                            > \"${CMAKE_BINARY_DIR}\"/${SRC_FILE} && \"${CAT_EXEC}\" \"${CMAKE_BINARY_DIR}\"/${SRC_FILE} | \
-                            \"${GREP_EXEC}\" unsigned | \"${SED_EXEC}\" -E 's/(unsigned.*)=.*/extern \\1;/g' \
-                            | \"${SED_EXEC}\" -E 's/(.*)\\s(.*)\\\[\\\](.*)/\\1 * \\2 \\3/g'
-                            > \"${CMAKE_BINARY_DIR}\"/${HEADER}"
-            COMMENT     "Generating ${SRC_FILE}..."
-            DEPENDS     ${CMAKE_SOURCE_DIR}/src/res/${RES}
+            OUTPUT  "${_outc}" "${_outh}"
+            COMMAND "${CMAKE_SOURCE_DIR}/script/gen_header.sh" "${_outc}" "${_outh}" "${XXD_NAME}" "${_in}"
+            DEPENDS "${_in}"
+            COMMENT "Generating ${SRC_FILE} and ${HEADER}..."
             VERBATIM
     )
 
