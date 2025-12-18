@@ -80,6 +80,7 @@
 #include <ctime>
 #include <exception>
 #include <algorithm>
+#include <iostream>
 #define cimg_str(x) #x
 #define cimg_str2(x) cimg_str(x)
 
@@ -56229,7 +56230,10 @@ namespace cimg_library {
           else if (!cimg::strcasecmp(f_type,"webp")) load_webp(filename);
           else if (!cimg::strcasecmp(f_type,"jxl")) load_jxl(filename);
           else is_loaded = false;
-        } catch (CImgIOException&) { is_loaded = false; }
+        } catch (CImgIOException& e) {
+            std::cerr << e.what() << std::endl;
+            is_loaded = false;
+        }
       }
 
       // If nothing loaded, try to load file with other means.
