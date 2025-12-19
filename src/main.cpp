@@ -23,9 +23,24 @@ utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
     { .short_name = 'b', .long_name = "block_file", .argument_required = true,  .description = "CFS target path" },
 };
 
-void handler (const std::vector<std::string> & vec)
+std::vector <std::string> ls_under_pwd_of_cfs(const std::string & /* type is always cfs */)
 {
-    dlog(vec, "\n");
+    return {};
+}
+
+bool command_main_entry_point(const std::vector<std::string> & vec)
+{
+    if (vec.empty()) return true;
+
+    if (vec.front() == "quit" || vec.front() == "exit") {
+        return false;
+    }
+
+    if (vec.front() == "help") {
+        std::cout << cmdTpTree::command_template_tree.get_help();
+    }
+
+    return true;
 }
 
 int main(int argc, char** argv)
@@ -74,17 +89,11 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
-        cmdTpTree::read_command(handler, [](const std::string & str)->std::vector<std::string> { return {
-            "AAAA", "AAAB"
-        }; }, "cfs> ");
-        __asm__("nop");
-    }
-    catch (cfs::error::generalCFSbaseError & e) {
-        elog(e.what(), "\n");
+        cmdTpTree::read_command(command_main_entry_point, ls_under_pwd_of_cfs, "cfs> ");
+        return EXIT_SUCCESS;
     }
     catch (std::exception & e) {
         elog(e.what(), "\n");
+        return EXIT_FAILURE;
     }
-
-    return 0;
 }

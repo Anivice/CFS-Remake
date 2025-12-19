@@ -14,9 +14,11 @@
 #
 
 {
-    < help      (List help text for all commands):          [NONE]      >,
-    < help_at   (List help text for one specific command):  [ARB]       >,
-    < format    (Format a disk):                            [HSP]       >,
-    < ls        (List everything under current pwd):        [CFSP]      >,
-    < dummy: helpText(help) >,
+    < help      (List help text for all commands)           :       [NONE]      >,
+    < help_at   (List help text for one specific command)   :       [ARB]       >,
+    < format    (Format a disk)                             :       [HSP]       >,
+    < ls        (List everything under current pwd)         :       [CFSP]      >,
+    < quit      (Quit the utility)                          :       [NONE]      >,
+    < exit      (Quit the utility)                          :       [NONE]      >,
+    < dummy(help1): c(help2) >
 }

@@ -30,6 +30,7 @@ namespace cmdTpTree
         std::string verb_;
         std::vector < std::string > verbs_;
         std::string help_text_;
+        std::map < std::string, std::string > help_map_;
         NodeType * entry_ = nullptr;
         CurrentStatusType status_ = NoOperation;
     };
@@ -132,6 +133,33 @@ namespace cmdTpTree
         /// @return help text
         /// @throws cfs::error::command_not_found Provided command path doesn't have a match
         [[nodiscard]] std::string get_help(const std::vector < std::string > & command_string) const;
+
+        [[nodiscard]] std::string get_help()
+        {
+            std::vector<std::pair<std::string, std::string>> command_help_text;
+            uint64_t max_command_length = 0;
+            for_each([&](const NodeType& node, const int depth)
+            {
+                if (!node.help_text_.empty())
+                {
+                    std::ostringstream oss;
+                    oss << std::string(depth * 2, ' ') << (depth & 0x01 ? "-> " : " ") << node.name_;
+                    const auto str = oss.str();
+                    command_help_text.emplace_back(str, node.help_text_);
+                    if (max_command_length < str.length()) {
+                        max_command_length = str.length();
+                    }
+                }
+            });
+
+            std::ostringstream oss;
+            for (const auto & [command, help] : command_help_text) {
+                oss << command << std::string(max_command_length - command.length(), ' ');
+                oss << ": " << help << std::endl;
+            }
+
+            return oss.str();
+        }
     } command_template_tree;
 
 
@@ -141,7 +169,7 @@ namespace cmdTpTree
     /// command handler, invoked by read_command automatically
     template < typename F>
     concept CommandHandler = requires(F f, const std::vector < std::string > & command_string) {
-        { std::invoke(f, command_string) } -> std::same_as<void>;
+        { std::invoke(f, command_string) } -> std::same_as<bool>; /// return true to continue, false to quit
     };
 
     template < typename F>
@@ -233,7 +261,9 @@ namespace cmdTpTree
                     }
                 }
                 free(line);
-                handler_(command_vector);
+                if (!handler_(command_vector)) {
+                    return;
+                }
             } catch (const std::exception & e) {
                 elog(e.what(), "\n");
             }

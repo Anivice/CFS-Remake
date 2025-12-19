@@ -81,6 +81,7 @@ namespace cmdTpTree
             std::string & verb_ = stack.back().verb_;
             std::vector < std::string > & verbs_ = stack.back().verbs_;
             std::string & help_text_ = stack.back().help_text_;
+            auto & help_map_ = stack.back().help_map_;
             NodeType * entry = stack.back().entry_;
             CurrentStatusType & status = stack.back().status_;
 
@@ -123,20 +124,27 @@ namespace cmdTpTree
                     continue;
                 }
                 case ':': {
+                    if (!help_text_.empty()) {
+                        help_map_.emplace(command_, help_text_);
+                        help_text_.clear();
+                    }
                     status = ReadingVerbs;
                     continue;
                 }
                 case '>': {
-                    if (!verb_.empty()) verbs_.push_back(verb_);
+                    if (!verb_.empty()) {
+                        verbs_.push_back(verb_);
+                        help_map_.emplace(verb_, help_text_);
+                    }
 
-                    entry->help_text_ = help_text_;
+                    entry->help_text_ = help_map_[command_];
                     entry->name_ = command_;
                     for (const auto & v : verbs_)
                     {
                         entry->children_.emplace_back(std::make_unique< NodeType >(NodeType{
                             .name_ = v,
-                            .help_text_ = help_text_,
-                            .children_ = {},
+                            .help_text_ = help_map_[v],
+                            // .children_ = {},
                             .parent_ = entry,
                         }));
                     }
@@ -162,6 +170,8 @@ namespace cmdTpTree
                         verb_ += c;
                     } else if (!verb_.empty()) {
                         verbs_.push_back(verb_);
+                        help_map_.emplace(verb_, help_text_);
+                        help_text_.clear();
                         verb_.clear();
                     }
                     break;
