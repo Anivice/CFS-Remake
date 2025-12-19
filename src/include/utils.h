@@ -84,8 +84,13 @@ namespace cfs::utils
     uint64_t get_timestamp() noexcept;
 }
 
+#define NO_COPY_OBJ(name)                                       \
+    name(const name &) = delete;                                \
+    name & operator=(const name &) = delete;                    \
+    name(name &&) = delete;                                     \
+    name & operator=(name &&) = delete;
+
 #include "colors.h"
-#include "execute.h"
 #include "logger.h"
 
 #endif //CFS_UTILS_H

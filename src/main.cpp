@@ -69,10 +69,12 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
-        cmdTpTree::commandTemplateTree_t argumentTree = cmdTpTree::gen_cmd(cfs_command_source, cfs_command_source_len);
-        cmdTpTree::for_each(argumentTree.root, [](const cmdTpTree::NodeType & arg, const int depth) {
+        cmdTpTree::commandTemplateTree_t cmdTree = cmdTpTree::gen_cmd(cfs_command_source, cfs_command_source_len);
+        cmdTree.for_each([](const cmdTpTree::NodeType & arg, const int depth) {
             std::cout << std::string(depth, ' ') << arg.name_ << " " << (depth & 0x01 ? "Verb" : "Sub") << std::endl;
         });
+
+        dlog(cmdTree.get_help({"command", "subcommand1"}), "\n");
         __asm__("nop");
     }
     catch (cfs::error::generalCFSbaseError & e) {

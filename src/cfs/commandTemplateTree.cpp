@@ -14,6 +14,33 @@ namespace cmdTpTree
         return ret;
     }
 
+    const NodeType * find(const NodeType &entry, const std::string &name)
+    {
+        for (const auto & v : entry.children_)
+        {
+            if (v->name_ == name) {
+                return v.get();
+            }
+        }
+
+        return nullptr;
+    }
+
+    const NodeType * find(const NodeType &root,
+        const std::vector<std::string> &command_string)
+    {
+        auto * entry = &root;
+        for (const auto & verb : command_string)
+        {
+            entry = find(*entry, verb);
+            if (!entry) {
+                throw cfs::error::command_not_found();
+            }
+        }
+
+        return entry;
+    }
+
     void commandTemplateTree_t::construct(const std::string &command_description)
     {
         /*

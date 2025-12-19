@@ -3,14 +3,8 @@
 #include <filesystem>
 #include <regex>
 #include "utils.h"
+#include "execute.h"
 extern void show();
-
-/*
-* 16-12-2025 01:07:41.642724307 (main) [INFO]: [
-  /home/anivice/CLionProjects/CFS-Remake/cmake-build-debug/bitmap.test,
-  /home/anivice/CLionProjects/CFS-Remake/cmake-build-debug/false.test,
-]
- */
 
 int main(int argc, char ** argv)
 {

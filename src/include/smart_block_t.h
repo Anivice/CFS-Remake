@@ -22,12 +22,6 @@ make_simple_error_class(filesystem_head_corrupt_and_unable_to_recover)
 make_simple_error_class(invalid_argument)
 make_simple_error_class(cannot_discard_blocks)
 
-#define NO_COPY_OBJ(name)                                       \
-    name(const name &) = delete;                                \
-    name & operator=(const name &) = delete;                    \
-    name(name &&) = delete;                                     \
-    name & operator=(name &&) = delete;
-
 namespace cfs
 {
     /// bitmap base class
