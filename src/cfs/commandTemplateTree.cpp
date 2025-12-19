@@ -229,6 +229,8 @@ namespace cmdTpTree
         return arg;
     }
 
+    SpecialArgumentCandidates SpecialArgumentCandidatesGenerator = nullptr;
+
     static std::vector < std::string > args_completion_list;
     static int special_index = 0;
 
@@ -266,9 +268,20 @@ namespace cmdTpTree
         {
             if (current_special == host_system_path || current_special == arbitrary_length) {
                 matches = rl_completion_matches(text, rl_filename_completion_function);
-            } else if (current_special == cfs_path) {
-                wlog("Function not implemented\n");
-            } else if (current_special == no_subcommands) {
+            }
+            else if (current_special == cfs_path)
+            {
+                if (SpecialArgumentCandidatesGenerator) {
+                    args_completion_list.clear();
+                    current_verbs = SpecialArgumentCandidatesGenerator(current_special);
+                    matches = rl_completion_matches(text, arg_generator);
+                }
+                else {
+                    wlog("Function not implemented\n");
+                    matches = nullptr;
+                }
+            }
+            else if (current_special == no_subcommands) {
                 matches = nullptr;
             }
         };
@@ -297,8 +310,9 @@ namespace cmdTpTree
                 if (args_completion_list.size() == 1 && args_completion_list.front() == arbitrary_length) {
                     special_handler(arbitrary_length);
                 } else {
-                    const auto current_index = arg_index - special_index;
-                    if (current_index < args_completion_list.size()) {
+                    if (const auto current_index = arg_index - special_index;
+                        current_index < args_completion_list.size())
+                    {
                         special_handler(args_completion_list[current_index]);
                     } else {
                         matches = nullptr;

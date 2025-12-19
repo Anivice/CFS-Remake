@@ -1,5 +1,22 @@
+# Readline prompt auto completion script
+# Format:
+# {
+#     < Command (Help message for this command): verb1 (help message for verb1),
+#           < subcommand (help message for subcommand): verb2(subcommand has verb2) >,
+#           verb3 (Command has verb3) >,
+# }
+# Here: we have -> Command [verb1, [verb3, [subcommand verb1]]] generated for auto completion
+# Special verbs:
+#   [NONE]: No verb
+#   [ARB]:  Infinite length. This will tell readline to complete host system file list indefinitely
+#   [HSP]:  Host System Path. This will tell readline to complete host system file list for this particular position
+#   [CFSP]: CFS Path. This path will be completed by external CFS invoker and return the required path.
+#
+
 {
-    < help      (List help text for all commands): [NONE] >,            # Help
-    < help_at   (List help text for one specific command): [ARB] >,     # Help
-    < format    (Format a disk): [HSP], [HSP] >,                        # Format
+    < help      (List help text for all commands):          [NONE]      >,
+    < help_at   (List help text for one specific command):  [ARB]       >,
+    < format    (Format a disk):                            [HSP]       >,
+    < ls        (List everything under current pwd):        [CFSP]      >,
+    < dummy: helpText(help) >,
 }

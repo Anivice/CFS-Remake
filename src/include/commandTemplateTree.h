@@ -134,18 +134,28 @@ namespace cmdTpTree
         [[nodiscard]] std::string get_help(const std::vector < std::string > & command_string) const;
     } command_template_tree;
 
-    /// for_each handler, constraint it to be accepting only void(const Readline::NodeType&, int)
-    template <typename F>
+
+    using SpecialArgumentCandidates = std::function<std::vector<std::string>(const std::string &)>;
+    extern SpecialArgumentCandidates SpecialArgumentCandidatesGenerator;
+
+    /// command handler, invoked by read_command automatically
+    template < typename F>
     concept CommandHandler = requires(F f, const std::vector < std::string > & command_string) {
         { std::invoke(f, command_string) } -> std::same_as<void>;
     };
 
+    template < typename F>
+    concept SpecialArgumentCandidatePointer = requires(F f, const std::string & type) {
+            { std::invoke(f, type) } -> std::same_as<std::vector<std::string>>;
+    };
+
     char ** cmd_completion(const char *text, int start, int end);
 
-    template < CommandHandler handler >
-    void read_command(handler handler_, const std::string & prompt)
+    template < CommandHandler handler, SpecialArgumentCandidatePointer spc_gen>
+    void read_command(handler handler_, spc_gen spc_gen_, const std::string & prompt)
     {
         pthread_setname_np(pthread_self(), "readline");
+        SpecialArgumentCandidatesGenerator = spc_gen_;
 
         auto remove_leading_and_tailing_spaces = [](const std::string & text)->std::string
         {

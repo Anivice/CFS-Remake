@@ -74,7 +74,9 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
-        cmdTpTree::read_command(handler, "cfs> ");
+        cmdTpTree::read_command(handler, [](const std::string & str)->std::vector<std::string> { return {
+            "AAAA", "AAAB"
+        }; }, "cfs> ");
         __asm__("nop");
     }
     catch (cfs::error::generalCFSbaseError & e) {
