@@ -99,8 +99,8 @@ function(generate_from_resource_file RES SRC_FILE HEADER XXD_NAME)
     set(_outc "${CMAKE_BINARY_DIR}/${SRC_FILE}")
     set(_outh "${CMAKE_BINARY_DIR}/${HEADER}")
 
-    add_custom_command(
-            OUTPUT  "${_outc}" "${_outh}"
+    add_custom_target(${RES} ALL
+            BYPRODUCTS  "${_outc}" "${_outh}"
             COMMAND "${CMAKE_SOURCE_DIR}/script/gen_header.sh" "${_outc}" "${_outh}" "${XXD_NAME}" "${_in}"
             DEPENDS "${_in}"
             COMMENT "Generating ${SRC_FILE} and ${HEADER}..."
@@ -130,9 +130,12 @@ target_link_libraries(cfs_obj PUBLIC atomic)
 add_executable(cfs src/main.cpp
         ${CMAKE_BINARY_DIR}/version.cpp         ${CMAKE_BINARY_DIR}/version.h
         ${CMAKE_BINARY_DIR}/cfs_command.cpp     ${CMAKE_BINARY_DIR}/cfs_command.h
-        src/include/routes.h src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp)
+        src/include/routes.h src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp
+        src/cfs/commandTemplateTree.cpp
+        src/include/commandTemplateTree.h)
 target_link_libraries(cfs PRIVATE cfs_obj ncurses::ncurses readline::readline atomic)
 target_include_directories(cfs PRIVATE ${CMAKE_BINARY_DIR})
+add_dependencies(cfs version.txt cfs.command.readline)
 
 function(add_link LINK)
     add_custom_target(utility_links_${LINK} ALL
