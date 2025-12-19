@@ -23,6 +23,11 @@ utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
     { .short_name = 'b', .long_name = "block_file", .argument_required = true,  .description = "CFS target path" },
 };
 
+void handler (const std::vector<std::string> & vec)
+{
+    dlog(vec, "\n");
+}
+
 int main(int argc, char** argv)
 {
     try
@@ -69,12 +74,7 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
-        cmdTpTree::commandTemplateTree_t cmdTree = cmdTpTree::gen_cmd(cfs_command_source, cfs_command_source_len);
-        cmdTree.for_each([](const cmdTpTree::NodeType & arg, const int depth) {
-            std::cout << std::string(depth, ' ') << arg.name_ << " " << (depth & 0x01 ? "Verb" : "Sub") << std::endl;
-        });
-
-        dlog(cmdTree.get_help({"command", "subcommand1"}), "\n");
+        cmdTpTree::read_command(handler, "cfs> ");
         __asm__("nop");
     }
     catch (cfs::error::generalCFSbaseError & e) {

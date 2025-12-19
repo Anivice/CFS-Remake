@@ -130,10 +130,9 @@ target_link_libraries(cfs_obj PUBLIC atomic)
 add_executable(cfs src/main.cpp
         ${CMAKE_BINARY_DIR}/version.cpp         ${CMAKE_BINARY_DIR}/version.h
         ${CMAKE_BINARY_DIR}/cfs_command.cpp     ${CMAKE_BINARY_DIR}/cfs_command.h
-        src/include/routes.h src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp
-        src/cfs/commandTemplateTree.cpp
-        src/include/commandTemplateTree.h)
-target_link_libraries(cfs PRIVATE cfs_obj ncurses::ncurses readline::readline atomic)
+        src/include/routes.h                    src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp
+        src/cfs/commandTemplateTree.cpp         src/include/commandTemplateTree.h)
+target_link_libraries(cfs PUBLIC cfs_obj readline::readline ncurses::ncurses atomic)
 target_include_directories(cfs PRIVATE ${CMAKE_BINARY_DIR})
 add_dependencies(cfs version.txt cfs.command.readline)
 

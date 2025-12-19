@@ -1,5 +1,7 @@
 #include "commandTemplateTree.h"
 #include "logger.h"
+#include "cfs_command.h"
+#include "readline.h"
 #include <sstream>
 #include <cstring>
 
@@ -172,5 +174,143 @@ namespace cmdTpTree
                 default: elog("Unparsed character: `", c, "'\n");
             }
         }
+    }
+
+    const NodeType * commandTemplateTree_t::find(const std::vector<std::string> &command_string) const
+    {
+        return cmdTpTree::find(root, command_string);
+    }
+
+    std::vector<std::string> commandTemplateTree_t::find_sub_commands(const std::vector<std::string> &command_string) const
+    {
+        const auto * node = cmdTpTree::find(root, command_string);
+        std::vector < std::string > result;
+        for (const auto & v : node->children_) {
+            result.push_back(v->name_);
+        }
+
+        return result;
+    }
+
+    std::string commandTemplateTree_t::get_help(const std::vector<std::string> &command_string) const
+    {
+        const auto * node = cmdTpTree::find(root, command_string);
+        return node->help_text_;
+    }
+
+    commandTemplateTree_t command_template_tree = gen_cmd(cfs_command_source, cfs_command_source_len);
+
+    std::vector < std::string > current_verbs;
+    static char * arg_generator(const char *text, const int state)
+    {
+        std::vector<std::string> arg2_verbs = current_verbs;
+        arg2_verbs.emplace_back("");
+        static int index, len;
+        const char *name;
+        if (!state) { index = 0; len = static_cast<int>(strlen(text)); }
+        while (((name = arg2_verbs[index++].c_str())) && strlen(name) > 0)
+        {
+            if (strncmp(name, text, len) == 0)
+                return strdup(name);
+        }
+        return nullptr;
+    }
+
+    static int argument_index(const char *buffer, const int start)
+    {
+        int arg = 0;
+        int i = 0;
+        while (i < start) {
+            while (buffer[i] && buffer[i] == ' ') i++; /* skip spaces */
+            if (i >= start || buffer[i] == '\0') break;
+            arg++;
+            while (buffer[i] && buffer[i] != ' ') i++; /* skip over word */
+        }
+        return arg;
+    }
+
+    static std::vector < std::string > args_completion_list;
+    static int special_index = 0;
+
+    char ** cmd_completion(const char *text, const int start, const int end)
+    {
+        (void)end;
+        char **matches = nullptr;
+        std::string this_arg = rl_line_buffer;
+        while (!this_arg.empty() && this_arg.back() == ' ') this_arg.pop_back(); // remove tailing spaces
+        while (!this_arg.empty() && this_arg.front() == ' ') this_arg.erase(this_arg.begin()); // remove leading spaces
+        const int arg_index = argument_index(rl_line_buffer, start);
+        std::vector < std::string > args;
+        {
+            std::string arg;
+            std::ranges::for_each(this_arg, [&](const char c) {
+                if (c != ' ') {
+                    arg += c;
+                } else {
+                    if (!arg.empty()) args.emplace_back(arg);
+                    arg.clear();
+                }
+            });
+
+            if (!arg.empty()) args.emplace_back(arg);
+            if (args.size() > arg_index) args.pop_back();
+        }
+
+        auto can_find_special_args = [](const std::vector<std::string> & pargs) {
+            return std::ranges::any_of(pargs, [](const std::string & arg) {
+                return arg.find('[') != std::string::npos;
+            });
+        };
+
+        auto special_handler = [&](const std::string & current_special)
+        {
+            if (current_special == host_system_path || current_special == arbitrary_length) {
+                matches = rl_completion_matches(text, rl_filename_completion_function);
+            } else if (current_special == cfs_path) {
+                wlog("Function not implemented\n");
+            } else if (current_special == no_subcommands) {
+                matches = nullptr;
+            }
+        };
+
+        try
+        {
+            if (const auto sub_commands = command_template_tree.find_sub_commands(args);
+                can_find_special_args(sub_commands))
+            {
+                args_completion_list.clear();
+                special_index = arg_index;
+                for (int i = special_index - 1; i < sub_commands.size(); i++) {
+                    args_completion_list.push_back(sub_commands[i]);
+                }
+
+                const auto & current_special = sub_commands[special_index - 1];
+                special_handler(current_special);
+            }
+            else {
+                args_completion_list.clear();
+                current_verbs = sub_commands;
+                matches = rl_completion_matches(text, arg_generator);
+            }
+        } catch (cfs::error::command_not_found &) {
+            if (!args_completion_list.empty()) {
+                if (args_completion_list.size() == 1 && args_completion_list.front() == arbitrary_length) {
+                    special_handler(arbitrary_length);
+                } else {
+                    const auto current_index = arg_index - special_index;
+                    if (current_index < args_completion_list.size()) {
+                        special_handler(args_completion_list[current_index]);
+                    } else {
+                        matches = nullptr;
+                    }
+                }
+            }
+            else {
+                matches = nullptr;
+            }
+        }
+
+        rl_attempted_completion_over = 1;
+        return matches;
     }
 } // cmdTpTree

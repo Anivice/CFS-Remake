@@ -1,7 +1,5 @@
 {
-    < command (Help text):
-        < subcommand1 (Help text2): verb1, <subcommand1.1: verb1>, verb2, verb3 >,
-        < subcommand2: verb1 >,
-    >, # comments are ignored util '\n'
-    < command2 (Help text3 ): [HSP], [CFSP] >
+    < help      (List help text for all commands): [NONE] >,            # Help
+    < help_at   (List help text for one specific command): [ARB] >,     # Help
+    < format    (Format a disk): [HSP], [HSP] >,                        # Format
 }
