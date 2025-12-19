@@ -20,7 +20,6 @@ namespace utils = cfs::utils;
 utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
     { .short_name = 'h', .long_name = "help",       .argument_required = false, .description = "Show help" },
     { .short_name = 'v', .long_name = "version",    .argument_required = false, .description = "Show version" },
-    { .short_name = 'b', .long_name = "block_file", .argument_required = true,  .description = "CFS target path" },
 };
 
 std::vector <std::string> ls_under_pwd_of_cfs(const std::string & /* type is always cfs */)

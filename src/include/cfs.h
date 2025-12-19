@@ -120,6 +120,7 @@ namespace cfs
         CorruptionDetected = 0x2000, // [Corruption Type]
         FilesystemBitmapModification = 0x2010, // [FROM] [TO] [LOCATION]
         AttemptedFixFinishedAndAssumedFine = 0x2020, // [Corruption Type]
+        FilesystemAttributeModification = 0x2030, // [FROM] [TO] [LOCATION]
     };
 
     enum FilesystemActionParameters : uint64_t {
