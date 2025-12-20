@@ -5,16 +5,27 @@
 #include "commandTemplateTree.h"
 #include <vector>
 #include <string>
+#include "cfsBasicComponents.h"
 
 namespace cfs
 {
     class CowFileSystem {
     private:
-        std::string cfs_pwd;
-        std::string host_pwd;
+        std::string cfs_pwd_;
+        std::string host_pwd_;
+
+        filesystem cfs_basic_filesystem_;
+        cfs_journaling_t journaling_;
+        cfs_bitmap_block_mirroring_t mirrored_bitmap_;
+        cfs_block_attribute_access_t block_attribute_;
 
     public:
-        CowFileSystem() = default;
+        explicit CowFileSystem(const std::string & path) :
+            cfs_basic_filesystem_(path),
+            journaling_(&cfs_basic_filesystem_),
+            mirrored_bitmap_(&cfs_basic_filesystem_, &journaling_),
+            block_attribute_(&cfs_basic_filesystem_, &journaling_)
+        { }
 
     private:
         /// wrapper for ls_pwd

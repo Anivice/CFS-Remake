@@ -134,32 +134,9 @@ namespace cmdTpTree
         /// @throws cfs::error::command_not_found Provided command path doesn't have a match
         [[nodiscard]] std::string get_help(const std::vector < std::string > & command_string) const;
 
-        [[nodiscard]] std::string get_help()
-        {
-            std::vector<std::pair<std::string, std::string>> command_help_text;
-            uint64_t max_command_length = 0;
-            for_each([&](const NodeType& node, const int depth)
-            {
-                if (!node.help_text_.empty())
-                {
-                    std::ostringstream oss;
-                    oss << std::string(depth * 2, ' ') << (depth & 0x01 ? "-> " : " ") << node.name_;
-                    const auto str = oss.str();
-                    command_help_text.emplace_back(str, node.help_text_);
-                    if (max_command_length < str.length()) {
-                        max_command_length = str.length();
-                    }
-                }
-            });
-
-            std::ostringstream oss;
-            for (const auto & [command, help] : command_help_text) {
-                oss << command << std::string(max_command_length - command.length(), ' ');
-                oss << ": " << help << std::endl;
-            }
-
-            return oss.str();
-        }
+        /// get help
+        /// @return help text for all commands
+        [[nodiscard]] std::string get_help();
     } command_template_tree;
 
 

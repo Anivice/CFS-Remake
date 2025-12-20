@@ -3,6 +3,65 @@
 
 #include "cfs.h"
 #include "smart_block_t.h"
+#include "generalCFSbaseError.h"
+
+make_simple_error_class(no_more_free_spaces)
+
+#define auto_write_two_two(j, f, s_a, s_d, ss_a, ss_d, f_a, f_d)                        \
+    journal_auto_write_t journal_auto_write(j, f,                                       \
+        s_a, s_d, 0, 0, 0, 0,                                                           \
+        ss_a, ss_d, 0, 0, 0, 0,                                                         \
+        f_a, f_d, 0, 0, 0, 0)
+
+#define auto_write_three_two(j, f, s_a, s_d, s_dx, ss_a, ss_d, f_a, f_d)                \
+    journal_auto_write_t journal_auto_write(j, f,                                       \
+        s_a, s_d, s_dx, 0, 0, 0,                                                        \
+        ss_a, ss_d, 0, 0, 0, 0,                                                         \
+        f_a, f_d, 0, 0, 0, 0)
+
+#define auto_write_four_two(j, f, s_a, s_d, s_dx, s_dx1, ss_a, ss_d, f_a, f_d)          \
+    journal_auto_write_t journal_auto_write(j, f,                                       \
+        s_a, s_d, s_dx, s_dx1, 0, 0,                                                    \
+        ss_a, ss_d, 0, 0, 0, 0,                                                         \
+        f_a, f_d, 0, 0, 0, 0)
+
+#define auto_write_five_two(j, f, s_a, s_d, s_dx, s_dx1, s_dx2, ss_a, ss_d, f_a, f_d)   \
+    journal_auto_write_t journal_auto_write(j, f,                                       \
+        s_a, s_d, s_dx, s_dx1, s_dx2, 0,                                                \
+        ss_a, ss_d, 0, 0, 0, 0,                                                         \
+        f_a, f_d, 0, 0, 0, 0)
+
+#define auto_write_six_two(j, f, s_a, s_d, s_dx, s_dx1, s_dx2, s_dx3, ss_a, ss_d, f_a, f_d)         \
+    journal_auto_write_t journal_auto_write(j, f,                                                   \
+        s_a, s_d, s_dx, s_dx1, s_dx2, s_dx3,                                                        \
+        ss_a, ss_d, 0, 0, 0, 0,                                                                     \
+        f_a, f_d, 0, 0, 0, 0)
+
+#define g_transaction_3(j, f, act) \
+    auto_write_two_two(j, f, GlobalTransaction, act, GlobalTransaction, act##_Completed, GlobalTransaction, act##_Failed)
+
+#define g_transaction_4(j, f, act, dx) \
+    auto_write_three_two(j, f, GlobalTransaction, act, dx, GlobalTransaction, act##_Completed, GlobalTransaction, act##_Failed)
+
+#define g_transaction_5(j, f, act, dx, dx1) \
+    auto_write_four_two(j, f, GlobalTransaction, act, dx, dx1, GlobalTransaction, act##_Completed, GlobalTransaction, act##_Failed)
+
+#define g_transaction_6(j, f, act, dx, dx1, dx2) \
+    auto_write_five_two(j, f, GlobalTransaction, act, dx, dx1, dx2, GlobalTransaction, act##_Completed, GlobalTransaction, act##_Failed)
+
+#define g_transaction_7(j, f, act, dx, dx1, dx2, dx3) \
+    auto_write_six_two(j, f, GlobalTransaction, act, dx, dx1, dx2, dx3, GlobalTransaction, act##_Completed, GlobalTransaction, act##_Failed)
+
+#define __COUNT_ARGS(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, \
+    _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, N, ...) N
+
+#define COUNT_ARGS(...) \
+    __COUNT_ARGS(, ##__VA_ARGS__, \
+    20,19,18,17,16,15,14,13,12,11,10,9,8, \
+    g_transaction_7,g_transaction_6,g_transaction_5,g_transaction_4,g_transaction_3, \
+    2,1,0)
+
+#define g_transaction(...)  COUNT_ARGS(__VA_ARGS__)(__VA_ARGS__)
 
 namespace cfs
 {
@@ -52,6 +111,7 @@ namespace cfs
 
         NO_COPY_OBJ(cfs_journaling_t);
     };
+
     class cfs_bitmap_singular_t : public bitmap_base
     {
     public:
@@ -104,14 +164,81 @@ namespace cfs
         void set(uint64_t index, cfs_block_attribute_t attr);
     };
 
+    class journal_auto_write_t {
+        cfs_journaling_t * journal_;
+        bool & success_;
+
+
+        // success
+        const uint64_t success_action_;
+        const uint64_t success_action_param0_;
+        const uint64_t success_action_param1_;
+        const uint64_t success_action_param2_;
+        const uint64_t success_action_param3_;
+        const uint64_t success_action_param4_;
+
+        // failed
+        const uint64_t failed_action_;
+        const uint64_t failed_action_param0_;
+        const uint64_t failed_action_param1_;
+        const uint64_t failed_action_param2_;
+        const uint64_t failed_action_param3_;
+        const uint64_t failed_action_param4_;
+
+    public:
+        journal_auto_write_t(
+            cfs_journaling_t * journal,
+            bool & success,
+
+            // start
+            uint64_t start_action,
+            uint64_t start_action_param0,
+            uint64_t start_action_param1,
+            uint64_t start_action_param2,
+            uint64_t start_action_param3,
+            uint64_t start_action_param4,
+
+            // success
+            uint64_t success_action,
+            uint64_t success_action_param0,
+            uint64_t success_action_param1,
+            uint64_t success_action_param2,
+            uint64_t success_action_param3,
+            uint64_t success_action_param4,
+
+            // failed
+            uint64_t failed_action,
+            uint64_t failed_action_param0,
+            uint64_t failed_action_param1,
+            uint64_t failed_action_param2,
+            uint64_t failed_action_param3,
+            uint64_t failed_action_param4);
+
+        ~journal_auto_write_t();
+    };
+
     class cfs_block_manager_t {
         cfs_bitmap_block_mirroring_t * bitmap_;
         filesystem::cfs_header_block_t * header_;
+        cfs_block_attribute_access_t * block_attribute_;
+        cfs_journaling_t * journal_;
 
     public:
-        cfs_block_manager_t(cfs_bitmap_block_mirroring_t * bitmap, filesystem::cfs_header_block_t * header)
-            : bitmap_(bitmap), header_(header) { }
+        cfs_block_manager_t(
+            cfs_bitmap_block_mirroring_t * bitmap,
+            filesystem::cfs_header_block_t * header,
+            cfs_block_attribute_access_t * block_attribute,
+            cfs_journaling_t * journal
+            );
 
+        [[nodiscard]] uint64_t allocate();
+
+        void deallocate(const uint64_t index)
+        {
+            bool success = true;
+            g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
+            bitmap_->set_bit(index, false);
+        }
     };
 }
 

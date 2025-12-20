@@ -44,28 +44,49 @@ namespace cfs {
             std::cout.write(reinterpret_cast<const char *>(version_text), version_text_len);
             std::cout << std::endl;
         }
-        else if (vec.front() == "format") {
-            if (vec.size() < 2) {
-                std::cerr << "format [DISK] <BLOCK SIZE> <LABEL>" << std::endl;
-                return true;
-            }
+        else if (vec.front() == "debug" && vec.size() >= 2) {
+            if (vec[1] == "cat" && vec.size() == 3)
+            {
+                if (vec[2] == "bitmap")
+                {
+                    ilog("Bitmap for the whole filesystem:\n");
+                    const auto col = utils::get_screen_col_row().second;
+                    const auto fs_bitmap_size =
+                        cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
+                    for (uint64_t i = 0; i < fs_bitmap_size; i++)
+                    {
+                        if (i > col && i % col == 0) {
+                            std::cout << "\n";
+                        }
 
-            const std::string & disk = vec[1];
-            std::string block_size_str = "4096", label;
+                        if (mirrored_bitmap_.get_bit(i))
+                        {
+                            switch (const auto attr = block_attribute_.get(i); attr.block_type)
+                            {
+                                case CowRedundancy:
+                                    std::cout << color::color(3,3,3) << "R" << color::no_color();
+                                    break;
+                                case IndexNode:
+                                    std::cout << color::color(0,0,5) << "I" << color::no_color();
+                                    break;
+                                case PointerBlock:
+                                    std::cout << color::color(0,5,0) << "P" << color::no_color();
+                                    break;
+                                case StorageBlock:
+                                    std::cout << color::color(5,5,0) << "S" << color::no_color();
+                                    break;
+                                default:
+                                    std::cout << color::color(5,5,5) << "x" << color::no_color();
+                            }
+                        } else {
+                            std::cout << ".";
+                        }
+                    }
 
-            if (vec.size() >= 3) {
-                block_size_str = vec[2];
-            }
-
-            if (vec.size() == 4) {
-                label = vec[3];
-            }
-
-            try {
-                const auto block_size = std::strtoull(block_size_str.c_str(), nullptr, 10);
-                cfs::make_cfs(disk, block_size, label);
-            } catch (std::exception & e) {
-                elog(e.what(), "\n");
+                    if (fs_bitmap_size % col != 0) {
+                        std::cout << "\n";
+                    }
+                }
             }
         }
 

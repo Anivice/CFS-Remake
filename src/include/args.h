@@ -76,10 +76,22 @@ namespace cfs::utils
         [[nodiscard]] std::string at(char c) const;
 
         /// get argument list
+        /// @param c argument short name
+        /// @return corresponding argument list
+        /// @throws cfs::error::no_such_argument argument not found in parsed list
+        [[nodiscard]] std::string operator[](const char c) const { return at(c); }
+
+        /// get argument list
         /// @param str argument short name
         /// @return corresponding argument list
         /// @throws cfs::error::no_such_argument argument not found in parsed list
         [[nodiscard]] std::string at(const std::string & str) const;
+
+        /// get argument list
+        /// @param str argument short name
+        /// @return corresponding argument list
+        /// @throws cfs::error::no_such_argument argument not found in parsed list
+        [[nodiscard]] std::string operator[](const std::string & str) const { return at(str); }
 
         friend class ArgumentParser;
     };

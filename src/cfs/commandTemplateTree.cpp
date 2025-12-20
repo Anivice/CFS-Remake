@@ -208,6 +208,33 @@ namespace cmdTpTree
         return node->help_text_;
     }
 
+    std::string commandTemplateTree_t::get_help()
+    {
+        std::vector<std::pair<std::string, std::string>> command_help_text;
+        uint64_t max_command_length = 0;
+        for_each([&](const NodeType& node, const int depth)
+        {
+            if (!node.help_text_.empty())
+            {
+                std::ostringstream oss;
+                oss << std::string(depth * 2, ' ') << node.name_;
+                const auto str = oss.str();
+                command_help_text.emplace_back(str, node.help_text_);
+                if (max_command_length < str.length()) {
+                    max_command_length = str.length();
+                }
+            }
+        });
+
+        std::ostringstream oss;
+        for (const auto & [command, help] : command_help_text) {
+            oss << command << std::string(max_command_length - command.length(), ' ');
+            oss << ": " << help << std::endl;
+        }
+
+        return oss.str();
+    }
+
     commandTemplateTree_t command_template_tree = gen_cmd(cfs_command_source, cfs_command_source_len);
 
     std::vector < std::string > current_verbs;

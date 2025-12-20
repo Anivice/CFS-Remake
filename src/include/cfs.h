@@ -44,9 +44,10 @@ namespace cfs
             uint64_t allocation_bitmap_checksum_cow;
             struct {
                 uint64_t clean:1;
+                uint64_t _reserved:63;
             } flags;
             uint64_t last_allocated_block;
-            uint64_t allocated_blocks;
+            uint64_t allocated_non_cow_blocks;
         };
         runtime_info_t runtime_info; // runtime info
         runtime_info_t runtime_info_cow; // cow of the last change
@@ -73,6 +74,8 @@ namespace cfs
         POINTER_BLOCK = 0x02,
         STORAGE_BLOCK = 0x03,
     };
+
+    enum BlockAttribute_BlockType : uint8_t { CowRedundancy = 0x00, IndexNode = 0x01, PointerBlock = 0x02, StorageBlock = 0x03 };
 
     constexpr uint64_t cfs_block_attribute_size = 4;
     struct cfs_block_attribute_t {
@@ -115,18 +118,31 @@ namespace cfs
     };
     static_assert(sizeof(journal_header_t) == cfs_journal_header_size, "Faulty journal header size");
 
-    enum FilesystemActionType : uint64_t {
-        ActionFinishedAndNoExceptionCaughtDuringTheOperation = 0x1000,
-        CorruptionDetected = 0x2000, // [Corruption Type]
-        FilesystemBitmapModification = 0x2010, // [FROM] [TO] [LOCATION]
-        AttemptedFixFinishedAndAssumedFine = 0x2020, // [Corruption Type]
-        FilesystemAttributeModification = 0x2030, // [FROM] [TO] [LOCATION]
-    };
+#   define _CFS_str(x) #x
+#   define CFS_str(x) _CFS_str(x)
+#   define FilesystemActionType_Def(name, val) \
+    enum FilesystemActionType_##name : uint64_t { name = val }; \
+    constexpr const char * name##_c_str = CFS_str(name);
 
-    enum FilesystemActionParameters : uint64_t {
-        // CorruptionDetected
-        BitmapMirrorInconsistent = 0x2001,
-    };
+    FilesystemActionType_Def(ActionFinishedAndNoExceptionCaughtDuringTheOperation, 0x1000);
+
+    FilesystemActionType_Def(CorruptionDetected, 0x2000); // [Corruption Type]
+    FilesystemActionType_Def(BitmapMirrorInconsistent, 0x2001);
+    FilesystemActionType_Def(FilesystemBlockExhausted, 0x2002);
+
+    FilesystemActionType_Def(FilesystemBitmapModification, 0x2010); // [FROM] [TO] [LOCATION]
+    FilesystemActionType_Def(AttemptedFixFinishedAndAssumedFine, 0x2020); // [Corruption Type]
+    FilesystemActionType_Def(FilesystemAttributeModification, 0x2030); // [FROM] [TO] [LOCATION]
+
+    FilesystemActionType_Def(GlobalTransaction, 0x3000) // [Transaction Type], [PARAM...]
+
+#   define GlobalTransaction_Def(x, val) \
+    FilesystemActionType_Def(x, val); \
+    FilesystemActionType_Def(x##_Completed, val + 1); \
+    FilesystemActionType_Def(x##_Failed, val + 2);
+
+    GlobalTransaction_Def(GlobalTransaction_AllocateBlock, 0x3001)
+    GlobalTransaction_Def(GlobalTransaction_DeallocateBlock, 0x3004)
 }
 
 #endif //CFS_CFS_H

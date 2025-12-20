@@ -15,6 +15,7 @@ namespace utils = cfs::utils;
 utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
     { .short_name = 'h', .long_name = "help",       .argument_required = false, .description = "Show help" },
     { .short_name = 'v', .long_name = "version",    .argument_required = false, .description = "Show version" },
+    { .short_name = 'p', .long_name = "path",       .argument_required = true,  .description = "Path to CFS archive file" },
 };
 
 int main(int argc, char** argv)
@@ -41,7 +42,7 @@ int main(int argc, char** argv)
             return mount_main(argc, argv);
         }
 
-        if (route == "mkfs.route") {
+        if (route == "mkfs.cfs") {
             return mkfs_main(argc, argv);
         }
 
@@ -63,8 +64,13 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
-        cfs::CowFileSystem CowFileSystem;
-        CowFileSystem.readline();
+        if (parsed.contains("path")) {
+            cfs::CowFileSystem CowFileSystem(parsed["path"]);
+            CowFileSystem.readline();
+        } else {
+            throw std::invalid_argument("Missing CFS file path");
+        }
+
         return EXIT_SUCCESS;
     }
     catch (std::exception & e) {
