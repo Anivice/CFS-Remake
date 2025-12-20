@@ -91,45 +91,17 @@ namespace cfs
         filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
     public:
-        explicit cfs_block_attribute_access_t(filesystem * parent_fs_governor, cfs_journaling_t * journal)
-        : parent_fs_governor_(parent_fs_governor), journal_(journal)
-        {
-        }
+        explicit cfs_block_attribute_access_t(filesystem * parent_fs_governor, cfs_journaling_t * journal);
 
         /// get the attribute at provided index
         /// @param index Block index
         /// @return block attribute
-        [[nodiscard]] cfs_block_attribute_t get(const uint64_t index)
-        {
-            const auto offset = index * sizeof(cfs_block_attribute_t);
-            const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
-            const auto page = offset / parent_fs_governor_->static_info_.block_size +
-                parent_fs_governor_->static_info_.data_block_attribute_table_start;
-            cfs_block_attribute_t ret {};
-            const auto lock = parent_fs_governor_->lock(page);
-            std::memcpy(&ret, lock.data() + in_page_offset, sizeof(ret));
-            return ret;
-        }
+        [[nodiscard]] cfs_block_attribute_t get(uint64_t index);
 
         /// get the attribute at provided index
         /// @param index Block index
         /// @param attr New attribute
-        void set(const uint64_t index, const cfs_block_attribute_t attr)
-        {
-            const auto offset = index * sizeof(cfs_block_attribute_t);
-            const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
-            const auto page = offset / parent_fs_governor_->static_info_.block_size +
-                parent_fs_governor_->static_info_.data_block_attribute_table_start;
-            cfs_block_attribute_t original {};
-            const auto lock = parent_fs_governor_->lock(page);
-            std::memcpy(&original, lock.data() + in_page_offset, sizeof(original));
-            journal_->push_action(FilesystemAttributeModification,
-                *reinterpret_cast<uint32_t *>(&original),
-                *reinterpret_cast<const uint32_t *>(&attr),
-                index);
-            std::memcpy(lock.data() + in_page_offset, &attr, sizeof(attr));
-            journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
-        }
+        void set(uint64_t index, cfs_block_attribute_t attr);
     };
 
     class cfs_block_manager_t {

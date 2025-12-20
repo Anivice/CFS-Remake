@@ -191,3 +191,37 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
 
     journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
 }
+
+cfs::cfs_block_attribute_access_t::cfs_block_attribute_access_t(filesystem *parent_fs_governor,
+    cfs_journaling_t *journal): parent_fs_governor_(parent_fs_governor), journal_(journal)
+{
+}
+
+cfs::cfs_block_attribute_t cfs::cfs_block_attribute_access_t::get(const uint64_t index)
+{
+    const auto offset = index * sizeof(cfs_block_attribute_t);
+    const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
+    const auto page = offset / parent_fs_governor_->static_info_.block_size +
+                      parent_fs_governor_->static_info_.data_block_attribute_table_start;
+    cfs_block_attribute_t ret {};
+    const auto lock = parent_fs_governor_->lock(page);
+    std::memcpy(&ret, lock.data() + in_page_offset, sizeof(ret));
+    return ret;
+}
+
+void cfs::cfs_block_attribute_access_t::set(const uint64_t index, const cfs_block_attribute_t attr)
+{
+    const auto offset = index * sizeof(cfs_block_attribute_t);
+    const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
+    const auto page = offset / parent_fs_governor_->static_info_.block_size +
+                      parent_fs_governor_->static_info_.data_block_attribute_table_start;
+    cfs_block_attribute_t original {};
+    const auto lock = parent_fs_governor_->lock(page);
+    std::memcpy(&original, lock.data() + in_page_offset, sizeof(original));
+    journal_->push_action(FilesystemAttributeModification,
+                          *reinterpret_cast<uint32_t *>(&original),
+                          *reinterpret_cast<const uint32_t *>(&attr),
+                          index);
+    std::memcpy(lock.data() + in_page_offset, &attr, sizeof(attr));
+    journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
+}

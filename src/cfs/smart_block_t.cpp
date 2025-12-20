@@ -1,20 +1,10 @@
 #include "smart_block_t.h"
 #include "utils.h"
-#include <cerrno>
 #include <fcntl.h>
 #include <filesystem>
-#include <linux/fs.h>   // BLKDISCARD, BLKGETSIZE64
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
-#include <sys/ioctl.h>
 #include <unistd.h>
-
-static int discard_range(const int fd, const uint64_t offset, const uint64_t length)
-{
-    uint64_t range[2] = { offset, length };          // bytes
-    return ioctl(fd, BLKDISCARD, range);
-}
 
 void cfs::bitmap_base::init(const uint64_t required_blocks)
 {
@@ -228,44 +218,13 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
 {
     ilog("Discarding blocks...\n");
     namespace fs = std::filesystem;
-    if (fs::is_block_file(path_to_block_file))
-    {
-        const int fd = open(path_to_block_file.c_str(), O_RDWR | O_CLOEXEC);
-        assert_throw(fd > 0, "invalid file descriptor");
+    int fd = 0;
+    const uint64_t size_bytes = fs::file_size(path_to_block_file);
+    assert_throw((fd = open(path_to_block_file.c_str(), O_RDWR)) > 0, "invalid file descriptor");
+    assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, size_bytes) == 0, "fallocate() failed");
+    assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, size_bytes) == 0, "fallocate() failed");
+    close(fd);
 
-        uint64_t size_bytes = 0;
-        assert_throw(ioctl(fd, BLKGETSIZE64, &size_bytes) == 0, "ioctl(BLKGETSIZE64) failed")
-
-        // Chunk size: pick something sane; if EINVAL, reduce it.
-        uint64_t step = 256ULL * 1024 * 1024; // 256 MiB
-        for (uint64_t off = 0; off < size_bytes; )
-        {
-            uint64_t len = size_bytes - off;
-            if (len > step) len = step;
-
-            if (discard_range(fd, off, len) != 0)
-            {
-                if (errno == EINVAL && step > (1ULL * 1024 * 1024)) {
-                    step /= 2; // device may have a smaller max discard size
-                    continue;
-                }
-
-                throw error::cannot_discard_blocks("discard failed at off=", off, " len=", len);
-            }
-            off += len;
-        }
-        close(fd);
-    }
-    else if (fs::is_regular_file(path_to_block_file))
-    {
-        int fd = 0;
-        const uint64_t size_bytes = fs::file_size(path_to_block_file);
-        assert_throw((fd = open(path_to_block_file.c_str(), O_RDWR)) > 0, "invalid file descriptor");
-        assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, size_bytes) == 0, "fallocate() failed");
-        assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, size_bytes) == 0, "fallocate() failed");
-        close(fd);
-    }
-    ilog("Discard complete\n");
     basic_io::mmap file(path_to_block_file);
     assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
     const auto head = make_head(file.size(), block_size, label);

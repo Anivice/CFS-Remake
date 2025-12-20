@@ -14,13 +14,36 @@
 #
 
 {
-    < help      (List help text for all commands)           :       [NONE]      >,
-    < help_at   (List help text for one specific command)   :       [ARB]       >,
-    < format    (Format a disk)                             :       [HSP]       >,
-    # < ls        (List everything under current pwd)         :       [CFSP]      >,
-    < quit      (Quit the utility)                          :       [NONE]      >,
-    < exit      (Quit the utility)                          :       [NONE]      >,
-    < version   (Show version message)                      :       [NONE]      >,
+    < help      (List help text for all commands):              [NONE]      >,
+    < help_at   (List help text for one specific command):      [ARB]       >,
+    < format    (Format a disk):                                [HSP]       >,
+    < quit      (Quit the utility):                             [NONE]      >,
+    < exit      (Quit the utility):                             [NONE]      >,
+    < version   (Show version message):                         [NONE]      >,
+
+    # CFS file operations:
+    < ls        (List everything under current PWD):            [CFSP]      >,
+    < cd        (Change current PWD):                           [CFSP]      >,
+    < pwd       (Show PWD):                                     [NONE]      >,
+
+    < copy_to_host      (Copy a file to host filesystem):       [CFSP], [HSP]       >,
+    < copy_from_host    (Copy a file from host to CFS):         [HSP],  [CFSP]      >,
+    < copy              (Copy a file):                          [CFSP], [CFSP]      >,
+    < del               (Delete a file):                        [CFSP]              >,
+    < deltree           (Delete recursively):                   [CFSP]              >,
+    < copytree          (Copy recursively):                     [CFSP], [CFSP]      >,
+    < symlink           (Create a symbol link):                 [CFSP], [CFSP]      >,
+    < mkdir             (Create a directory):                   [CFSP]              >,
 
     # debug options:
+    < debug     (Debug commands):
+                < show_bitmap   (Show bitmap):      [NONE] >,
+                < show_header   (Read FS Header):   [NONE] >,
+                < show_attribute (Read attribute at a specific location): [NONE] >, # Even though it's marked as no parameters
+                                                                                    # it was mark as so only because no prompt
+                                                                                    # completion is really needed.
+                                                                                    # show_attribute [INDEX] is the actual syntax here
+                                                                                    # *.readline is a prompt and help declaration file which
+                                                                                    # DOES ABSOLUTELY NOT DICTATES HOW A COMMAND SYNTAX WORKS
+    >
 }

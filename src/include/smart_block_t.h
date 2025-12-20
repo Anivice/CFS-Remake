@@ -20,7 +20,6 @@ make_simple_error_class(cannot_even_read_cfs_header_in_that_small_tiny_file)
 make_simple_error_class(not_even_a_cfs_filesystem)
 make_simple_error_class(filesystem_head_corrupt_and_unable_to_recover)
 make_simple_error_class(invalid_argument)
-make_simple_error_class(cannot_discard_blocks)
 
 namespace cfs
 {

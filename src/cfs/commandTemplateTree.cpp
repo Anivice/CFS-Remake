@@ -282,7 +282,6 @@ namespace cmdTpTree
             else if (current_special == cfs_path)
             {
                 if (SpecialArgumentCandidatesGenerator) {
-                    args_completion_list.clear();
                     current_verbs = SpecialArgumentCandidatesGenerator(current_special);
                     matches = rl_completion_matches(text, arg_generator);
                 }
@@ -303,11 +302,8 @@ namespace cmdTpTree
             {
                 args_completion_list.clear();
                 special_index = arg_index;
-                for (int i = special_index - 1; i < sub_commands.size(); i++) {
-                    args_completion_list.push_back(sub_commands[i]);
-                }
-
-                const auto & current_special = sub_commands[special_index - 1];
+                args_completion_list = sub_commands;
+                const auto & current_special = args_completion_list.front();
                 special_handler(current_special);
             }
             else {
@@ -316,7 +312,8 @@ namespace cmdTpTree
                 matches = rl_completion_matches(text, arg_generator);
             }
         } catch (cfs::error::command_not_found &) {
-            if (!args_completion_list.empty()) {
+            auto complete = [&]
+            {
                 if (args_completion_list.size() == 1 && args_completion_list.front() == arbitrary_length) {
                     special_handler(arbitrary_length);
                 } else {
@@ -328,9 +325,33 @@ namespace cmdTpTree
                         matches = nullptr;
                     }
                 }
+            };
+
+            if (!args_completion_list.empty()) {
+                complete();
             }
             else {
-                matches = nullptr;
+                std::vector<std::string> list = args, commands;
+                while (!list.empty())
+                {
+                    try {
+                        commands = command_template_tree.find_sub_commands(list);
+                    } catch (cfs::error::command_not_found &) {
+                        list.pop_back();
+                        continue;
+                    }
+
+                    break;
+                }
+
+                if (commands.empty()) {
+                    matches = nullptr;
+                }
+                else {
+                    special_index = list.size();
+                    args_completion_list = commands;
+                    complete();
+                }
             }
         }
 
