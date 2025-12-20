@@ -2,6 +2,7 @@
 #define CFS_CFSBASICCOMPONENTS_H
 
 #include "cfs.h"
+#include "commandTemplateTree.h"
 #include "smart_block_t.h"
 #include "generalCFSbaseError.h"
 
@@ -312,6 +313,107 @@ namespace cfs
         const uint64_t block_size_;
         const uint64_t block_index_;
 
+        struct linearized_block_t {
+            std::vector < uint64_t > level1_pointers;
+            std::vector < uint64_t > level2_pointers;
+            std::vector < uint64_t > level3_pointers;
+        };
+
+        struct linearized_block_descriptor_t {
+            uint64_t level1_pointers;
+            uint64_t level2_pointers;
+            uint64_t level3_pointers;
+        };
+
+        [[nodiscard]] linearized_block_t linearize_all_blocks();
+
+        [[nodiscard]] linearized_block_descriptor_t size_to_linearized_block_descriptor(const uint64_t size) const
+        {
+            auto blocks_requires_for_this_many_pointers = [&](const uint64_t pointers)->uint64_t {
+                return cfs::utils::arithmetic::count_cell_with_cell_size(
+                    block_size_ / sizeof(uint64_t), // how many pointers can a storage hold?
+                    pointers); // this many pointers
+            };
+            linearized_block_t linearized_block;
+            /// basically, how many storage blocks, i.e., level 3 blocks
+            const uint64_t required_level3_blocks = cfs::utils::arithmetic::count_cell_with_cell_size(block_size_, size);
+            const uint64_t required_level2_blocks = blocks_requires_for_this_many_pointers(required_level3_blocks);
+            const uint64_t required_level1_blocks = blocks_requires_for_this_many_pointers(required_level2_blocks);
+            if (required_level1_blocks > cfs_level_1_index_numbers) {
+                throw error::no_more_free_spaces("Max file size more than inode can hold");
+            }
+
+            return {
+                .level1_pointers = required_level1_blocks,
+                .level2_pointers = required_level2_blocks,
+                .level3_pointers = required_level3_blocks
+            };
+        }
+
+        template < typename FuncAlloc, typename FuncDealloc >
+        class smart_reallocate_t {
+        public:
+            FuncAlloc alloc_;
+            FuncDealloc dealloc_;
+            uint64_t block_index_ = 0;
+            bool control_ = true;
+
+            explicit smart_reallocate_t(
+                FuncAlloc alloc, FuncDealloc dealloc,
+                const uint64_t block_index, const bool control)
+            : alloc_(alloc), dealloc_(dealloc), block_index_(block_index), control_(control) { }
+
+            smart_reallocate_t(FuncAlloc alloc, FuncDealloc dealloc) : alloc_(alloc), dealloc_(dealloc) {
+                if (control_) { block_index_ = alloc(); }
+            }
+
+            ~smart_reallocate_t() {
+                if (control_ && block_index_ != 0) { dealloc_(block_index_); }
+            }
+        };
+
+        void commit_from_block_descriptor(const linearized_block_descriptor_t & descriptor)
+        {
+            auto alloc = [&] { return block_manager_->allocate(); };
+            auto dealloc = [&](const uint64_t index) { return block_manager_->deallocate(index); };
+            using smart_reallocate_func_t = smart_reallocate_t<decltype(alloc), decltype(dealloc)>;
+
+            auto set_control = [](std::vector<std::unique_ptr<smart_reallocate_func_t>> & ctrl, const bool control)
+            {
+                std::ranges::for_each(ctrl, [&](const std::unique_ptr<smart_reallocate_func_t> & relc) {
+                    relc->control_ = control;
+                });
+            };
+
+            auto register_into_list = [&](const std::vector < uint64_t > & list)->std::vector<std::unique_ptr<smart_reallocate_func_t>>
+            {
+                std::vector<std::unique_ptr<smart_reallocate_func_t>> ret;
+                std::ranges::for_each(list, [&](const uint64_t blk) {
+                    ret.emplace_back(std::make_unique<smart_reallocate_func_t>(alloc, dealloc, blk, false));
+                });
+
+                return ret;
+            };
+
+            auto [level1_vec, level2_vec, level3_vec] = linearize_all_blocks();
+
+            std::vector<std::unique_ptr<smart_reallocate_func_t>> level1 = register_into_list(level1_vec);
+            std::vector<std::unique_ptr<smart_reallocate_func_t>> level2 = register_into_list(level2_vec);
+            std::vector<std::unique_ptr<smart_reallocate_func_t>> level3 = register_into_list(level3_vec);
+
+            set_control(level1, true);
+            set_control(level2, true);
+            set_control(level3, true);
+
+            level1.resize(descriptor.level1_pointers);
+            level2.resize(descriptor.level2_pointers);
+            level3.resize(descriptor.level3_pointers);
+
+            set_control(level1, false);
+            set_control(level2, false);
+            set_control(level3, false);
+        }
+
     public:
         cfs_inode_service_t(
             uint64_t index,
@@ -331,6 +433,9 @@ namespace cfs
         void set_atime(timespec st_atim);
         void set_ctime(timespec st_ctim);
         void set_mtime(timespec st_mtim);
+
+        /// get struct stat
+        [[nodiscard]] struct stat get_stat () const { return *cfs_inode_attribute; }
     };
 
     class cfs_directory_t : public cfs_inode_service_t {

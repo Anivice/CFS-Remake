@@ -464,10 +464,16 @@ uint64_t cfs::cfs_block_manager_t::allocate()
     return fully_allocate_by_running_through();
 }
 
-void cfs::cfs_block_manager_t::deallocate(const uint64_t index) {
+void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
+{
+    cfs_assert_simple(index != 0);
     bool success = true;
     g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
     bitmap_->set_bit(index, false);
+}
+
+cfs::cfs_inode_service_t::linearized_block_t cfs::cfs_inode_service_t::linearize_all_blocks()
+{
 }
 
 cfs::cfs_inode_service_t::cfs_inode_service_t(
