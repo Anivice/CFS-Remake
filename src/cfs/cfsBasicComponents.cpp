@@ -210,6 +210,18 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 
 void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool new_bit)
 {
+    {
+        // check for cache pool
+        std::lock_guard cpp_guard_(mutex_);
+        const auto ptr = bit_cache_.find(index);
+        if (ptr != bit_cache_.end())
+        {
+            if (new_bit == ptr->second) {
+                return; // unchanged, so just skip
+            }
+        }
+    }
+
     const auto original = this->get_bit(index);
     journal_->push_action(FilesystemBitmapModification, original, new_bit, index);
     const auto page_bare = index / parent_fs_governor_->static_info_.block_size * 8;
