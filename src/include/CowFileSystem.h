@@ -18,13 +18,15 @@ namespace cfs
         cfs_journaling_t journaling_;
         cfs_bitmap_block_mirroring_t mirrored_bitmap_;
         cfs_block_attribute_access_t block_attribute_;
+        cfs_block_manager_t block_manager_;
 
     public:
         explicit CowFileSystem(const std::string & path) :
             cfs_basic_filesystem_(path),
             journaling_(&cfs_basic_filesystem_),
             mirrored_bitmap_(&cfs_basic_filesystem_, &journaling_),
-            block_attribute_(&cfs_basic_filesystem_, &journaling_)
+            block_attribute_(&cfs_basic_filesystem_, &journaling_),
+            block_manager_(&mirrored_bitmap_, &cfs_basic_filesystem_.cfs_header_block, &block_attribute_, &journaling_)
         { }
 
     private:

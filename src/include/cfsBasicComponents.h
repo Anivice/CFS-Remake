@@ -250,6 +250,13 @@ namespace cfs
         /// @param index Block index
         void deallocate(uint64_t index);
     };
+
+    class cfs_copy_on_write_data_block_t {
+        cfs_block_manager_t * block_manager_;
+
+    public:
+        explicit cfs_copy_on_write_data_block_t(cfs_block_manager_t * block_manager) : block_manager_(block_manager) {}
+    };
 }
 
 #endif //CFS_CFSBASICCOMPONENTS_H

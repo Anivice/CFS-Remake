@@ -124,18 +124,23 @@ add_library(cfs_obj STATIC                      src/include/cfs.h
         src/cfs/smart_block_t.cpp               src/include/smart_block_t.h
         src/cfs/cfsBasicComponents.cpp          src/include/cfsBasicComponents.h
         src/misc/args.cpp                       src/include/args.h
+        src/cfs/commandTemplateTree.cpp         src/include/commandTemplateTree.h
+        src/cfs/CowFileSystem.cpp               src/include/CowFileSystem.h
+        ${CMAKE_BINARY_DIR}/version.cpp         ${CMAKE_BINARY_DIR}/version.h
+        ${CMAKE_BINARY_DIR}/cfs_command.cpp     ${CMAKE_BINARY_DIR}/cfs_command.h
 )
 target_link_libraries(cfs_obj PUBLIC atomic)
 
-add_executable(cfs src/main.cpp
-        ${CMAKE_BINARY_DIR}/version.cpp         ${CMAKE_BINARY_DIR}/version.h
-        ${CMAKE_BINARY_DIR}/cfs_command.cpp     ${CMAKE_BINARY_DIR}/cfs_command.h
-        src/include/routes.h                    src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp
-        src/cfs/commandTemplateTree.cpp         src/include/commandTemplateTree.h
-        src/cfs/CowFileSystem.cpp               src/include/CowFileSystem.h)
-target_link_libraries(cfs PUBLIC cfs_obj readline::readline ncurses::ncurses atomic)
+add_executable(cfs
+        src/main.cpp
+        src/include/routes.h
+        src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp
+)
+target_link_libraries(cfs PUBLIC cfs_obj)
+target_link_libraries(cfs_obj PUBLIC readline::readline ncurses::ncurses atomic)
 target_include_directories(cfs PRIVATE ${CMAKE_BINARY_DIR})
-add_dependencies(cfs version.txt cfs.command.readline)
+target_include_directories(cfs_obj PRIVATE ${CMAKE_BINARY_DIR})
+add_dependencies(cfs_obj version.txt cfs.command.readline)
 
 function(add_link LINK)
     add_custom_target(utility_links_${LINK} ALL
@@ -181,9 +186,13 @@ if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(cfs_obj PUBLIC DEBUG=1)
     target_compile_definitions(cfs PUBLIC DEBUG=1)
     if ("${SANITIZER}" STREQUAL "address")
+        target_compile_options(cfs_obj PRIVATE -fsanitize=address -fsanitize=undefined)
+        target_link_libraries(cfs_obj PRIVATE asan ubsan atomic)
         target_compile_options(cfs PRIVATE -fsanitize=address -fsanitize=undefined)
         target_link_libraries(cfs PRIVATE asan ubsan atomic)
     elseif("${SANITIZER}" STREQUAL "thread")
+        target_compile_options(cfs_obj PRIVATE -fsanitize=thread -fno-sanitize-recover=undefined -fno-sanitize=undefined)
+        target_link_libraries(cfs_obj PRIVATE tsan atomic)
         target_compile_options(cfs PRIVATE -fsanitize=thread -fno-sanitize-recover=undefined -fno-sanitize=undefined)
         target_link_libraries(cfs PRIVATE tsan atomic)
     endif()
