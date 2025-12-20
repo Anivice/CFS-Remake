@@ -2,6 +2,7 @@
 #define CFS_CFS_H
 
 #include <cstdint>
+#include <sys/stat.h>
 
 namespace cfs
 {
@@ -143,6 +144,26 @@ namespace cfs
 
     GlobalTransaction_Def(GlobalTransaction_AllocateBlock, 0x3001)
     GlobalTransaction_Def(GlobalTransaction_DeallocateBlock, 0x3004)
+    GlobalTransaction_Def(GlobalTransaction_CreateRedundancy, 0x3007)
+
+    /// CFS inode memory mapper
+    class cfs_inode_t {
+        char * data_ = nullptr;
+
+    public:
+        struct stat * cfs_inode_attribute = nullptr;
+        uint64_t * cfs_level_1_indexes = nullptr;
+        const uint64_t cfs_level_1_index_numbers = 0;
+
+        void convert(char * data, const uint64_t block_size)
+        {
+            *(uint64_t*)&cfs_level_1_index_numbers = ((block_size - sizeof(struct stat)) / sizeof(uint64_t));
+            data_ = data;
+            cfs_inode_attribute = (struct stat *)data;
+            cfs_level_1_indexes = (uint64_t *)(data + sizeof(struct stat));
+        }
+    };
+
 }
 
 #endif //CFS_CFS_H

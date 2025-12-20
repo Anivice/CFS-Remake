@@ -251,11 +251,100 @@ namespace cfs
         void deallocate(uint64_t index);
     };
 
-    class cfs_copy_on_write_data_block_t {
+    class cfs_copy_on_write_data_block_t
+    {
+        filesystem * parent_fs_governor_;
         cfs_block_manager_t * block_manager_;
+        cfs_journaling_t * journal_;
+        cfs_block_attribute_access_t * block_attribute_;
+        std::map < uint64_t, std::mutex > inode_locks;
 
     public:
-        explicit cfs_copy_on_write_data_block_t(cfs_block_manager_t * block_manager) : block_manager_(block_manager) {}
+        explicit cfs_copy_on_write_data_block_t(
+                filesystem * parent_fs_governor,
+                cfs_block_manager_t * block_manager,
+                cfs_journaling_t * journal,
+                cfs_block_attribute_access_t * block_attribute
+            )
+        :
+        parent_fs_governor_(parent_fs_governor),
+        block_manager_(block_manager),
+        journal_(journal),
+        block_attribute_(block_attribute)
+        { }
+
+    private:
+        [[nodiscard]] auto lock_page(const uint64_t index) const
+            { return parent_fs_governor_->lock(index); }
+        [[nodiscard]] auto lock_page(const uint64_t start, const uint64_t end) const
+            { return parent_fs_governor_->lock(start, end); }
+
+    public:
+
+        /// copy-on-write for one block
+        /// @param index Block index
+        /// @return Redundancy block index
+        uint64_t copy_on_write(const uint64_t index)
+        {
+            if (!block_attribute_->get(index).newly_allocated_thus_no_cow)
+            {
+                bool success = true;
+                g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index);
+                const auto new_block = block_manager_->allocate();
+                const auto new_ = lock_page(new_block);
+                const auto old_ = lock_page(index);
+                std::memcpy(new_.data(), old_.data(), old_.size());
+                return new_block;
+            }
+
+            return -1;
+        }
+    };
+
+    class cfs_inode_service_t : protected cfs_inode_t
+    {
+        filesystem::guard inode_effective_lock;
+        filesystem * parent_fs_governor_;
+        cfs_block_manager_t * block_manager_;
+        cfs_journaling_t * journal_;
+        cfs_block_attribute_access_t * block_attribute_;
+        cfs_copy_on_write_data_block_t * cow_;
+        const uint64_t block_size_;
+        const uint64_t block_index_;
+
+    public:
+        cfs_inode_service_t(
+            uint64_t index,
+            filesystem * parent_fs_governor,
+            cfs_block_manager_t * block_manager,
+            cfs_journaling_t * journal,
+            cfs_block_attribute_access_t * block_attribute,
+            cfs_copy_on_write_data_block_t * cow);
+
+        uint64_t read(char * data, uint64_t size, uint64_t offset);
+        uint64_t write(const char * data, uint64_t size, uint64_t offset);
+
+        void chdev(int dev);
+        void chrdev(dev_t dev);
+        void chmod(int mode);
+        void chown(int uid, int gid);
+        void set_atime(timespec st_atim);
+        void set_ctime(timespec st_ctim);
+        void set_mtime(timespec st_mtim);
+    };
+
+    class cfs_directory_t : public cfs_inode_service_t {
+    public:
+        cfs_directory_t(
+            uint64_t index,
+            filesystem * parent_fs_governor,
+            cfs_block_manager_t * block_manager,
+            cfs_journaling_t * journal,
+            cfs_block_attribute_access_t * block_attribute,
+            cfs_copy_on_write_data_block_t * cow);
+
+        /// create an inode under current directory
+        cfs_inode_service_t make_inode(const std::string & name);
     };
 }
 

@@ -469,3 +469,89 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index) {
     g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
     bitmap_->set_bit(index, false);
 }
+
+cfs::cfs_inode_service_t::cfs_inode_service_t(
+    const uint64_t index,
+    filesystem *parent_fs_governor,
+    cfs_block_manager_t *block_manager,
+    cfs_journaling_t *journal,
+    cfs_block_attribute_access_t *block_attribute,
+    cfs_copy_on_write_data_block_t *cow)
+:
+    inode_effective_lock(parent_fs_governor->lock(index)),
+    parent_fs_governor_(parent_fs_governor),
+    block_manager_(block_manager),
+    journal_(journal),
+    block_attribute_(block_attribute),
+    cow_(cow),
+    block_size_(parent_fs_governor->static_info_.block_size),
+    block_index_(index)
+{
+    convert(inode_effective_lock.data(), parent_fs_governor->static_info_.block_size);
+}
+
+uint64_t cfs::cfs_inode_service_t::read(char *data, uint64_t size, uint64_t offset)
+{
+}
+
+uint64_t cfs::cfs_inode_service_t::write(const char *data, uint64_t size, uint64_t offset)
+{
+}
+
+void cfs::cfs_inode_service_t::chdev(const int dev)
+{
+    cow_->copy_on_write(block_index_);
+    this->cfs_inode_attribute->st_dev = dev;
+}
+
+void cfs::cfs_inode_service_t::chrdev(const dev_t dev)
+{
+    cow_->copy_on_write(block_index_);
+    this->cfs_inode_attribute->st_rdev = dev;
+}
+
+void cfs::cfs_inode_service_t::chmod(const int mode)
+{
+    cow_->copy_on_write(block_index_);
+    this->cfs_inode_attribute->st_mode = mode;
+}
+
+void cfs::cfs_inode_service_t::chown(const int uid, const int gid)
+{
+    cow_->copy_on_write(block_index_);
+    this->cfs_inode_attribute->st_uid = uid;
+    this->cfs_inode_attribute->st_gid = gid;
+}
+
+void cfs::cfs_inode_service_t::set_atime(const timespec st_atim)
+{
+    cow_->copy_on_write(block_index_);
+    this->cfs_inode_attribute->st_atim = st_atim;
+}
+
+void cfs::cfs_inode_service_t::set_ctime(const timespec st_ctim)
+{
+    cow_->copy_on_write(block_index_);
+    this->cfs_inode_attribute->st_atim = st_ctim;
+}
+
+void cfs::cfs_inode_service_t::set_mtime(const timespec st_mtim)
+{
+    cow_->copy_on_write(block_index_);
+    this->cfs_inode_attribute->st_atim = st_mtim;
+}
+
+cfs::cfs_directory_t::cfs_directory_t(
+    const uint64_t index,
+    filesystem *parent_fs_governor,
+    cfs_block_manager_t *block_manager,
+    cfs_journaling_t *journal,
+    cfs_block_attribute_access_t *block_attribute,
+    cfs_copy_on_write_data_block_t *cow)
+: cfs_inode_service_t(index, parent_fs_governor, block_manager, journal, block_attribute, cow)
+{
+}
+
+cfs::cfs_inode_service_t cfs::cfs_directory_t::make_inode(const std::string &name)
+{
+}
