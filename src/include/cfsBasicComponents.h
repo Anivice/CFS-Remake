@@ -128,8 +128,19 @@ namespace cfs
         cfs::filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
 
+        std::atomic_int64_t last_get = -1;
+
+        std::map < uint64_t, bool > bit_cache_;
+        std::map < uint64_t, uint64_t > access_counter_;
+        std::mutex mutex_;
+
     public:
         explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor, cfs_journaling_t * journal);
+
+        /// Add index into cache pool
+        /// @param index index
+        /// @param new_bit New bit
+        void add_cache(uint64_t index, bool new_bit);
 
         /// Get bit at the specific location
         /// @param index Bit Index

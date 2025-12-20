@@ -130,6 +130,7 @@ namespace cfs
             const uint64_t tailing_header_blk_id_ = 0;
             cfs_head_t * fs_head = nullptr;
             cfs_head_t * fs_end = nullptr;
+            std::mutex mtx_;
 
             /// get runtime info from header blocks (both tailing and leading)
             /// @return Runtime info
@@ -145,79 +146,11 @@ namespace cfs
             /// @return Static info
             [[nodiscard]] cfs_head_t::static_info_t get_static_info() const noexcept { return parent_->static_info_; }
 
-            uint64_t get_info(const std::string & name)
-            {
-                if (name == "mount_timestamp") {
-                    return load().mount_timestamp;
-                }
-                if (name == "last_check_timestamp") {
-                    return load().last_check_timestamp;
-                }
-                if (name == "last_check_timestamp") {
-                    return load().last_check_timestamp;
-                }  // last time check ran
-                if (name == "snapshot_number") {
-                    return load().snapshot_number;
-                }
-                if (name == "snapshot_number_cow") {
-                    return load().snapshot_number_cow;
-                }
-                if (name == "allocation_bitmap_checksum") {
-                    return load().allocation_bitmap_checksum;
-                }
-                if (name == "allocation_bitmap_checksum_cow") {
-                    return load().allocation_bitmap_checksum_cow;
-                }
-                if (name == "flags") {
-                    const auto flags = load().flags;
-                    return *(uint64_t*)&flags;
-                }
-                if (name == "last_allocated_block") {
-                    return load().last_allocated_block;
-                }
-                if (name == "allocated_non_cow_blocks") {
-                    return load().allocated_non_cow_blocks;
-                }
+            /// get header info (one entry)
+            uint64_t get_info(const std::string & name);
 
-                cfs_assert_simple(false);
-            }
-
-            void set_info(const std::string & name, const uint64_t field)
-            {
-                auto info = load();
-                if (name == "mount_timestamp") {
-                    info.mount_timestamp = field;
-                }
-                else if (name == "last_check_timestamp") {
-                    info.last_check_timestamp = field;
-                }
-                else if (name == "last_check_timestamp") {
-                    info.last_check_timestamp = field;
-                }  // last time check ran
-                else if (name == "snapshot_number") {
-                    info.snapshot_number = field;
-                }
-                else if (name == "snapshot_number_cow") {
-                    info.snapshot_number_cow = field;
-                }
-                else if (name == "allocation_bitmap_checksum") {
-                    info.allocation_bitmap_checksum = field;
-                }
-                else if (name == "allocation_bitmap_checksum_cow") {
-                    info.allocation_bitmap_checksum_cow = field;
-                }
-                else if (name == "flags") {
-                    *(uint64_t*)&info.flags = field;
-                }
-                else if (name == "last_allocated_block") {
-                    info.last_allocated_block = field;
-                }
-                else if (name == "allocated_non_cow_blocks") {
-                    info.allocated_non_cow_blocks = field;
-                } else {
-                    cfs_assert_simple(false);
-                }
-            }
+            /// set header entry
+            void set_info(const std::string & name, uint64_t field);
 
         private:
             cfs_header_block_t() noexcept = default;

@@ -31,9 +31,8 @@ int main(int argc, char ** argv)
         auto T0 = [&](const uint64_t index)
         {
             pthread_setname_np(pthread_self(), ("T" + std::to_string(index)).c_str());
-            for (uint64_t i = 0; i < len / std::thread::hardware_concurrency(); i++) {
+            for (uint64_t i = 0; i < len; i++) {
                 (void)block_manager.allocate();
-                // dlog("Alloc: ", block_manager.allocate(), "\n");
             }
         };
 

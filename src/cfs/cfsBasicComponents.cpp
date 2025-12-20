@@ -122,16 +122,56 @@ cfs::cfs_bitmap_block_mirroring_t::cfs_bitmap_block_mirroring_t(cfs::filesystem 
 {
 }
 
+void cfs::cfs_bitmap_block_mirroring_t::add_cache(const uint64_t index, const bool new_bit)
+{
+    std::lock_guard cpp_guard_(mutex_);
+    constexpr uint64_t max_map_size = 1024 * 1024 * 16;
+    if (bit_cache_.size() > max_map_size)
+    {
+        std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
+        for (const auto & [pos, rate] : bit_cache_) {
+            access_cache_.emplace_back(pos, rate);
+        }
+        std::ranges::sort(access_cache_,
+                          [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
+                              return a.second < b.second;
+                          });
+        access_cache_.resize(access_cache_.size() - (max_map_size / 2));
+        std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
+            bit_cache_.erase(pos.first);
+        });
+    }
+
+    bit_cache_[index] = new_bit;
+}
+
 bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 {
-    // huge multipage state lock
-    auto lock = parent_fs_governor_->lock(
-        parent_fs_governor_->static_info_.data_bitmap_start,
-        parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
-    const auto map1 = mirror1.get_bit(index, false);
-    const auto map2 = mirror2.get_bit(index, false);
+    {
+        // check for cache pool
+        std::lock_guard cpp_guard_(mutex_);
+        const auto ptr = bit_cache_.find(index);
+        if (ptr != bit_cache_.end()) {
+            return ptr->second;
+        }
+    }
+
+    // huge multipage state lock (really slow, so it'd better be in cache pool)
+    const auto page_bare = index / parent_fs_governor_->static_info_.block_size * 8;
+    const auto bitmap_01 = parent_fs_governor_->static_info_.data_bitmap_start + page_bare;
+    const auto bitmap_02 = parent_fs_governor_->static_info_.data_bitmap_backup_start + page_bare;
+    bool map1, map2;
+    {
+        auto lock1 = parent_fs_governor_->lock(bitmap_01);
+        auto lock2 = parent_fs_governor_->lock(bitmap_02);
+        map1 = mirror1.get_bit(index, false);
+        map2 = mirror2.get_bit(index, false);
+    }
     if (map1 != map2)
     {
+        auto lock = parent_fs_governor_->lock(
+            parent_fs_governor_->static_info_.data_bitmap_start,
+            parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
         elog("Filesystem bitmap corrupted at runtime, fsck needed!\n");
         journal_->push_action(CorruptionDetected, BitmapMirrorInconsistent);
         auto & header_runtime_lock = parent_fs_governor_->cfs_header_block;
@@ -164,7 +204,7 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
     }
 
     // if (const auto ptr = debug_map_.find(index); ptr != debug_map_.end()) cfs_assert_simple(ptr->second == map1);
-
+    add_cache(index, map1);
     return map1;
 }
 
@@ -172,16 +212,15 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
 {
     const auto original = this->get_bit(index);
     journal_->push_action(FilesystemBitmapModification, original, new_bit, index);
-    // huge multipage state lock
-    auto lock = parent_fs_governor_->lock(
-        parent_fs_governor_->static_info_.data_bitmap_start,
-        parent_fs_governor_->static_info_.data_bitmap_backup_end - 1); // [start, end)
-
-    // debug_map_[index] = new_bit;
-
+    const auto page_bare = index / parent_fs_governor_->static_info_.block_size * 8;
+    const auto bitmap_01 = parent_fs_governor_->static_info_.data_bitmap_start + page_bare;
+    const auto bitmap_02 = parent_fs_governor_->static_info_.data_bitmap_backup_start + page_bare;
+    auto lock1 = parent_fs_governor_->lock(bitmap_01);
+    auto lock2 = parent_fs_governor_->lock(bitmap_02);
     mirror1.set_bit(index, new_bit, false);
     mirror2.set_bit(index, new_bit, false);
 
+    add_cache(index, new_bit);
     auto & header_runtime = parent_fs_governor_->cfs_header_block;
     header_runtime.set_info("allocation_bitmap_checksum_cow", header_runtime.get_info("allocation_bitmap_checksum"));
     header_runtime.set_info("allocation_bitmap_checksum", mirror1.dump_crc64());

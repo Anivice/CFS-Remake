@@ -237,6 +237,7 @@ add_unit_test(blocks src/tests/blocks.cpp)
 add_unit_test(cfs_comp_bitmaps src/tests/cfs_comp_bitmaps.cpp)
 add_unit_test(journal src/tests/journal.cpp)
 add_unit_test(attributes src/tests/attributes.cpp)
+add_unit_test(cfs_block_manager src/tests/cfs_block_manager.cpp)
 
 set(ZLIB_BUILD_EXAMPLES OFF)
 add_subdirectory(${CMAKE_SOURCE_DIR}/src/imgInTerm/libpng/zlib-1.3.1)
