@@ -8,31 +8,31 @@
 make_simple_error_class(no_more_free_spaces)
 
 #define auto_write_two_two(j, f, s_a, s_d, ss_a, ss_d, f_a, f_d)                        \
-    journal_auto_write_t journal_auto_write(j, f,                                       \
+    cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
         s_a, s_d, 0, 0, 0, 0,                                                           \
         ss_a, ss_d, 0, 0, 0, 0,                                                         \
         f_a, f_d, 0, 0, 0, 0)
 
 #define auto_write_three_two(j, f, s_a, s_d, s_dx, ss_a, ss_d, f_a, f_d)                \
-    journal_auto_write_t journal_auto_write(j, f,                                       \
+    cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
         s_a, s_d, s_dx, 0, 0, 0,                                                        \
         ss_a, ss_d, 0, 0, 0, 0,                                                         \
         f_a, f_d, 0, 0, 0, 0)
 
 #define auto_write_four_two(j, f, s_a, s_d, s_dx, s_dx1, ss_a, ss_d, f_a, f_d)          \
-    journal_auto_write_t journal_auto_write(j, f,                                       \
+    cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
         s_a, s_d, s_dx, s_dx1, 0, 0,                                                    \
         ss_a, ss_d, 0, 0, 0, 0,                                                         \
         f_a, f_d, 0, 0, 0, 0)
 
 #define auto_write_five_two(j, f, s_a, s_d, s_dx, s_dx1, s_dx2, ss_a, ss_d, f_a, f_d)   \
-    journal_auto_write_t journal_auto_write(j, f,                                       \
+    cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
         s_a, s_d, s_dx, s_dx1, s_dx2, 0,                                                \
         ss_a, ss_d, 0, 0, 0, 0,                                                         \
         f_a, f_d, 0, 0, 0, 0)
 
 #define auto_write_six_two(j, f, s_a, s_d, s_dx, s_dx1, s_dx2, s_dx3, ss_a, ss_d, f_a, f_d)         \
-    journal_auto_write_t journal_auto_write(j, f,                                                   \
+    cfs::journal_auto_write_t journal_auto_write(j, f,                                              \
         s_a, s_d, s_dx, s_dx1, s_dx2, s_dx3,                                                        \
         ss_a, ss_d, 0, 0, 0, 0,                                                                     \
         f_a, f_d, 0, 0, 0, 0)
@@ -52,12 +52,10 @@ make_simple_error_class(no_more_free_spaces)
 #define g_transaction_7(j, f, act, dx, dx1, dx2, dx3) \
     auto_write_six_two(j, f, GlobalTransaction, act, dx, dx1, dx2, dx3, GlobalTransaction, act##_Completed, GlobalTransaction, act##_Failed)
 
-#define __COUNT_ARGS(_0, _1, _2, _3, _4, _5, _6, _7, _8, _9, \
-    _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, N, ...) N
+#define __COUNT_ARGS(_0, _1, _2, _3, _4, _5, _6, _7, N, ...) N
 
 #define COUNT_ARGS(...) \
     __COUNT_ARGS(, ##__VA_ARGS__, \
-    20,19,18,17,16,15,14,13,12,11,10,9,8, \
     g_transaction_7,g_transaction_6,g_transaction_5,g_transaction_4,g_transaction_3, \
     2,1,0)
 
@@ -175,6 +173,7 @@ namespace cfs
         void set(uint64_t index, cfs_block_attribute_t attr);
     };
 
+    /// auto write to journal so I don't have to
     class journal_auto_write_t {
         cfs_journaling_t * journal_;
         bool & success_;
@@ -242,14 +241,14 @@ namespace cfs
             cfs_journaling_t * journal
             );
 
+        /// allocate a new block
+        /// @return New block index
+        /// @throws cfs::error::no_more_free_spaces Space ran out
         [[nodiscard]] uint64_t allocate();
 
-        void deallocate(const uint64_t index)
-        {
-            bool success = true;
-            g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
-            bitmap_->set_bit(index, false);
-        }
+        /// deallocate a block
+        /// @param index Block index
+        void deallocate(uint64_t index);
     };
 }
 

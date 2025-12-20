@@ -129,9 +129,17 @@ void cfs::cfs_bitmap_block_mirroring_t::add_cache(const uint64_t index, const bo
     if (bit_cache_.size() > max_map_size)
     {
         std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
-        for (const auto & [pos, rate] : bit_cache_) {
+        for (const auto & pos : bit_cache_ | std::views::keys)
+        {
+            if (auto acc = access_counter_.find(pos); acc == access_counter_.end()) {
+                access_counter_.emplace(pos, 0);
+            }
+        }
+
+        for (const auto & [pos, rate] : access_counter_) {
             access_cache_.emplace_back(pos, rate);
         }
+
         std::ranges::sort(access_cache_,
                           [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
                               return a.second < b.second;
@@ -140,6 +148,7 @@ void cfs::cfs_bitmap_block_mirroring_t::add_cache(const uint64_t index, const bo
         std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
             bit_cache_.erase(pos.first);
         });
+        access_counter_.clear();
     }
 
     bit_cache_[index] = new_bit;
@@ -150,6 +159,7 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
     {
         // check for cache pool
         std::lock_guard cpp_guard_(mutex_);
+        access_counter_[index]++;
         const auto ptr = bit_cache_.find(index);
         if (ptr != bit_cache_.end()) {
             return ptr->second;
@@ -213,6 +223,7 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
     {
         // check for cache pool
         std::lock_guard cpp_guard_(mutex_);
+        access_counter_[index]++;
         const auto ptr = bit_cache_.find(index);
         if (ptr != bit_cache_.end())
         {
@@ -401,33 +412,27 @@ uint64_t cfs::cfs_block_manager_t::allocate()
             }
 
             /// deallocate oldest redundancies
-            std::vector < std::pair <uint64_t, uint64_t > > pair_block_w_refresh;
+            uint64_t oldest = 0;
+            std::map < uint64_t, uint64_t > scanned_cow_blocks;
             for (uint64_t i = 0; i < map_size; ++i)
             {
                 if (bitmap_->get_bit(i)) {
                     const auto attr = block_attribute_->get(i);
                     if (attr.block_type == CowRedundancy) {
-                        pair_block_w_refresh.emplace_back(i, static_cast<uint64_t>(attr.index_node_referencing_number));
+                        if (oldest < attr.allocation_oom_scan_per_refresh_count)
+                            oldest = attr.allocation_oom_scan_per_refresh_count;
+                        scanned_cow_blocks.emplace(i, attr.allocation_oom_scan_per_refresh_count);
                     }
                 }
             }
-
-            /// sort
-            std::ranges::sort(pair_block_w_refresh,
-                              [](const std::pair <uint64_t, uint64_t > & a, const std::pair <uint64_t, uint64_t > & b)->bool
-                              { return a.second > b.second; });
 
             /// remove oldest ones
-            if (!pair_block_w_refresh.empty())
+            std::ranges::for_each(scanned_cow_blocks, [&](const std::pair<uint64_t, uint64_t> & block)
             {
-                const auto oldest = pair_block_w_refresh.front().second;
-                for (uint64_t i = 0; i < pair_block_w_refresh.size(); ++i)
-                {
-                    if (pair_block_w_refresh[i].second == oldest) {
-                        deallocate(i);
-                    }
+                if (block.second >= oldest / 2) {
+                    deallocate(block.first);
                 }
-            }
+            });
 
             // run the allocator again
             if (const auto ret_again = refresh_allocate(success, 0, map_size); !success) {
@@ -457,4 +462,10 @@ uint64_t cfs::cfs_block_manager_t::allocate()
     }
 
     return fully_allocate_by_running_through();
+}
+
+void cfs::cfs_block_manager_t::deallocate(const uint64_t index) {
+    bool success = true;
+    g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
+    bitmap_->set_bit(index, false);
 }
