@@ -33,10 +33,10 @@ namespace cfs
         /// wrapper for ls_pwd
         std::vector <std::string> ls_under_pwd_of_cfs(const std::string & /* type is always cfs */);
 
+    public:
         /// wrapper for entry point
         bool command_main_entry_point(const std::vector<std::string> & vec);
 
-    public:
         /// start readline utility mode
         void readline()
         {

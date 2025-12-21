@@ -50,12 +50,12 @@ namespace cfs {
                 if (vec[2] == "bitmap")
                 {
                     ilog("Bitmap for the whole filesystem:\n");
-                    const auto col = utils::get_screen_col_row().second;
+                    const auto col = utils::get_screen_row_col().second;
                     const auto fs_bitmap_size =
                         cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
                     for (uint64_t i = 0; i < fs_bitmap_size; i++)
                     {
-                        if (i > col && i % col == 0) {
+                        if (i != 0 && i % col == 0) {
                             std::cout << "\n";
                         }
 

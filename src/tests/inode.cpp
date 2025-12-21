@@ -1,6 +1,7 @@
 #include "smart_block_t.h"
 #include "cfsBasicComponents.h"
 #include <fcntl.h>
+#include <filesystem>
 #include <linux/falloc.h>
 #include <unistd.h>
 #include "utils.h"
@@ -11,8 +12,10 @@ int main(int argc, char ** argv)
     try
     {
         const char * disk = "bigfile.img";
-        if (argc == 1)
         {
+            if (std::filesystem::exists(disk)) {
+                std::filesystem::remove(disk);
+            }
             const int fd = open(disk, O_RDWR | O_CREAT, 0644);
             assert_throw(fd > 0, "fd");
             assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, 1024 * 1024 * 64) == 0, "fallocate() failed");
@@ -33,7 +36,7 @@ int main(int argc, char ** argv)
         raid1_bitmap.set_bit(0, true); // mark 0 as allocated
         cfs::cfs_inode_service_t inode_service(0, &fs, &block_manager, &journal, &block_attribute);
 
-        const cfs::basic_io::mmap file("1766215744-94d7707d-33baaa9f196336c7.png"); //test data
+        const cfs::basic_io::mmap file(argv[1]); //test data
         inode_service.write(file.data(), file.size(), 0);
 
         std::vector<char> data;
@@ -41,15 +44,6 @@ int main(int argc, char ** argv)
         inode_service.read(data.data(), file.size(), 0);
         write(fd, data.data(), data.size());
         close(fd);
-
-        auto show = [&inode_service]
-        {
-            const auto [level1_pointers, level2_pointers, level3_pointers]
-                = inode_service.linearize_all_blocks();
-            dlog("LV1: ", level1_pointers, "\n LV2:", level2_pointers, "\n LV3:", level3_pointers, "\n\n");
-        };
-
-        show();
     }
     catch (cfs::error::generalCFSbaseError & e) {
         elog(e.what(), "\n");

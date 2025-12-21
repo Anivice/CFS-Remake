@@ -128,10 +128,6 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
         return result & 0x01;
     }
 
-    if (const auto result = big_cache_.get_fast_cache(index); result != -1) {
-        return result & 0x01;
-    }
-
     // huge multipage state lock (really slow, so it'd better be in cache pool)
     const auto page_bare = index / (parent_fs_governor_->static_info_.block_size * 8);
     const auto bitmap_01 = parent_fs_governor_->static_info_.data_bitmap_start + page_bare;
@@ -153,7 +149,7 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
         auto & header_runtime_lock = parent_fs_governor_->cfs_header_block;
         const auto mirror1_checksum = mirror1.dump_crc64();
         const auto mirror2_checksum = mirror2.dump_crc64();
-        if (header_runtime_lock.get_info("allocation_bitmap_checksum") == mirror1_checksum) {
+        if (header_runtime_lock.get_info<allocation_bitmap_checksum>() == mirror1_checksum) {
             std::memcpy(
                 // dest: mirror
                 lock.data() + parent_fs_governor_->static_info_.data_bitmap_end * parent_fs_governor_->static_info_.block_size,
@@ -161,7 +157,7 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
                 lock.data(),
                 // length: map len
                 (parent_fs_governor_->static_info_.data_bitmap_end - parent_fs_governor_->static_info_.data_bitmap_start) * parent_fs_governor_->static_info_.block_size);
-        } else if (header_runtime_lock.get_info("allocation_bitmap_checksum") == mirror2_checksum) {
+        } else if (header_runtime_lock.get_info<allocation_bitmap_checksum>() == mirror2_checksum) {
             std::memcpy(
                 // src: non mirror
                 lock.data(),
@@ -180,17 +176,12 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
     }
 
     small_cache_.set_fast_cache(index, map1);
-    big_cache_.set_fast_cache(index, map1);
     return map1;
 }
 
 void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool new_bit)
 {
     if (const auto result = small_cache_.get_fast_cache(index); result != -1) {
-        if (new_bit == (result & 0x01)) return;
-    }
-
-    if (const auto result = big_cache_.get_fast_cache(index); result != -1) {
         if (new_bit == (result & 0x01)) return;
     }
 
@@ -205,11 +196,10 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
     mirror2.set_bit(index, new_bit, false);
 
     small_cache_.set_fast_cache(index, new_bit);
-    big_cache_.set_fast_cache(index, new_bit);
 
     auto & header_runtime = parent_fs_governor_->cfs_header_block;
-    header_runtime.set_info("allocation_bitmap_checksum_cow", header_runtime.get_info("allocation_bitmap_checksum"));
-    header_runtime.set_info("allocation_bitmap_checksum", mirror1.dump_crc64());
+    header_runtime.set_info<allocation_bitmap_checksum_cow>(header_runtime.get_info<allocation_bitmap_checksum>());
+    header_runtime.set_info<allocation_bitmap_checksum>(mirror1.dump_crc64());
     journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
 }
 
@@ -346,7 +336,7 @@ uint64_t cfs::cfs_block_manager_t::allocate()
             if (!bitmap_->get_bit(i)) {
                 /// get one
                 /// record last allocated position
-                header_->set_info("last_allocated_block", i);
+                header_->set_info<last_allocated_block>(i);
                 // allocate
                 allocate_at_this_index(i);
                 success = true;
@@ -412,12 +402,12 @@ uint64_t cfs::cfs_block_manager_t::allocate()
         }
     };
 
-    if (header_->get_info("last_allocated_block") + 1 < map_size)
+    if (header_->get_info<last_allocated_block>() + 1 < map_size)
     {
         bool success;
         if (const auto ret = refresh_allocate(
             success,
-            header_->get_info("last_allocated_block") + 1,
+            header_->get_info<last_allocated_block>() + 1,
             map_size); success)
         {
             return ret;
@@ -506,6 +496,7 @@ cfs::cfs_inode_service_t::size_to_linearized_block_descriptor(const uint64_t siz
     const uint64_t required_level2_blocks = blocks_requires_for_this_many_pointers(required_level3_blocks);
     const uint64_t required_level1_blocks = blocks_requires_for_this_many_pointers(required_level2_blocks);
     if (required_level1_blocks > cfs_level_1_index_numbers) {
+        std::cerr << "File size overload!" << std::endl;
         throw error::no_more_free_spaces("Max file size more than inode can hold");
     }
 
@@ -519,8 +510,24 @@ cfs::cfs_inode_service_t::size_to_linearized_block_descriptor(const uint64_t siz
 void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_block_descriptor_t &descriptor)
 {
     copy_on_write(block_index_); // cow on inode
-    auto alloc = [&] { return block_manager_->allocate(); };
-    auto dealloc = [&](const uint64_t index) { return block_manager_->deallocate(index); };
+    auto alloc = [&](const uint8_t blk_type)->uint64_t {
+        parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
+        const auto blk = block_manager_->allocate();
+        const cfs_block_attribute_t attr = {
+            .block_status = 0,
+            .block_type = blk_type,
+            .block_type_cow = 0,
+            .allocation_oom_scan_per_refresh_count = 0,
+            .newly_allocated_thus_no_cow = 1,
+            .index_node_referencing_number = 1,
+        };
+        block_attribute_->set(blk, attr);
+        return blk;
+    };
+    auto dealloc = [&](const uint64_t index) {
+        parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
+        return block_manager_->deallocate(index);
+    };
     using smart_reallocate_func_t = smart_reallocate_t<decltype(alloc), decltype(dealloc)>;
 
     auto set_control = [](std::vector<std::unique_ptr<smart_reallocate_func_t>> & ctrl, const bool control)
@@ -530,11 +537,12 @@ void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_blo
         });
     };
 
-    auto register_into_list = [&](const std::vector < uint64_t > & list)->std::vector<std::unique_ptr<smart_reallocate_func_t>>
+    auto register_into_list = [&](const std::vector < uint64_t > & list, const uint8_t type)->
+    std::vector<std::unique_ptr<smart_reallocate_func_t>>
     {
         std::vector<std::unique_ptr<smart_reallocate_func_t>> ret;
         std::ranges::for_each(list, [&](const uint64_t blk) {
-            ret.emplace_back(std::make_unique<smart_reallocate_func_t>(alloc, dealloc, blk, false));
+            ret.emplace_back(std::make_unique<smart_reallocate_func_t>(alloc, dealloc, blk, false, type));
         });
 
         return ret;
@@ -551,9 +559,9 @@ void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_blo
 
     auto [level1_vec, level2_vec, level3_vec] = linearize_all_blocks();
 
-    std::vector<std::unique_ptr<smart_reallocate_func_t>> level1 = register_into_list(level1_vec);
-    std::vector<std::unique_ptr<smart_reallocate_func_t>> level2 = register_into_list(level2_vec);
-    std::vector<std::unique_ptr<smart_reallocate_func_t>> level3 = register_into_list(level3_vec);
+    std::vector<std::unique_ptr<smart_reallocate_func_t>> level1 = register_into_list(level1_vec, POINTER_BLOCK);
+    std::vector<std::unique_ptr<smart_reallocate_func_t>> level2 = register_into_list(level2_vec, POINTER_BLOCK);
+    std::vector<std::unique_ptr<smart_reallocate_func_t>> level3 = register_into_list(level3_vec, STORAGE_BLOCK);
 
     set_control(level1, true);
     set_control(level2, true);
@@ -730,44 +738,44 @@ void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
 
 void cfs::cfs_inode_service_t::chdev(const int dev)
 {
-    copy_on_write(block_index_ + parent_fs_governor_->static_info_.data_table_start);
+    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_dev = dev;
 }
 
 void cfs::cfs_inode_service_t::chrdev(const dev_t dev)
 {
-    copy_on_write(block_index_ + parent_fs_governor_->static_info_.data_table_start);
+    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_rdev = dev;
 }
 
 void cfs::cfs_inode_service_t::chmod(const int mode)
 {
-    copy_on_write(block_index_ + parent_fs_governor_->static_info_.data_table_start);
+    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_mode = mode;
 }
 
 void cfs::cfs_inode_service_t::chown(const int uid, const int gid)
 {
-    copy_on_write(block_index_ + parent_fs_governor_->static_info_.data_table_start);
+    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_uid = uid;
     this->cfs_inode_attribute->st_gid = gid;
 }
 
 void cfs::cfs_inode_service_t::set_atime(const timespec st_atim)
 {
-    copy_on_write(block_index_ + parent_fs_governor_->static_info_.data_table_start);
+    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_atim = st_atim;
 }
 
 void cfs::cfs_inode_service_t::set_ctime(const timespec st_ctim)
 {
-    copy_on_write(block_index_ + parent_fs_governor_->static_info_.data_table_start);
+    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_atim = st_ctim;
 }
 
 void cfs::cfs_inode_service_t::set_mtime(const timespec st_mtim)
 {
-    copy_on_write(block_index_ + parent_fs_governor_->static_info_.data_table_start);
+    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_atim = st_mtim;
 }
 

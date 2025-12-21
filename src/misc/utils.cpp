@@ -35,7 +35,7 @@ std::string cfs::utils::replace_all(
     return original;
 }
 
-std::pair < const int, const int > cfs::utils::get_screen_col_row() noexcept
+std::pair < const int, const int > cfs::utils::get_screen_row_col() noexcept
 {
     constexpr int term_col_size = 80;
     constexpr int term_row_size = 25;

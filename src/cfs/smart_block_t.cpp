@@ -6,6 +6,8 @@
 #include <cstring>
 #include <unistd.h>
 
+#include "cfsBasicComponents.h"
+
 void cfs::bitmap_base::init(const uint64_t required_blocks)
 {
     *(uint64_t*)&bytes_required_ = cfs::utils::arithmetic::count_cell_with_cell_size(8, required_blocks);
@@ -113,6 +115,101 @@ static bool is_2_power_of(unsigned long long x)
     return false;
 }
 
+static void print_table(
+    const std::vector<std::pair < std::string, int > > & titles,
+    const std::vector<std::vector < std::string > > & vales,
+    const std::string & label)
+{
+
+    const auto [row, col] = cfs::utils::get_screen_row_col();
+    const auto max_available_per_col = (col - (titles.size() + 1)) / titles.size();
+    std::map < uint64_t, uint64_t > spaces;
+    bool use_max_avail = true;
+    auto find_max = [&](const auto & list, std::map < uint64_t, uint64_t > & spaces_)
+    {
+        cfs_assert_simple(list.size() == titles.size());
+        for (auto i = 0ul; i < list.size(); i++) {
+            if (list[i].length() > max_available_per_col) use_max_avail = false;
+            if (spaces_[i] < list[i].length()) spaces_[i] = list[i].length();
+        }
+    };
+
+    find_max(titles | std::views::keys, spaces);
+    std::ranges::for_each(vales, [&](const std::vector<std::string> & value){ find_max(value, spaces); });
+    if (use_max_avail) { std::ranges::for_each(spaces, [&](auto & value){ value.second = max_available_per_col; }); }
+
+    const std::string separator(col, '=');
+    {
+        const std::string left((col - (label.length() + 2)) / 2, '=');
+        const std::string right(col - left.length() - label.length() - 2, '=');
+        std::cout << left << " " << label << " " << right << std::endl;
+    }
+
+    std::vector<std::string> on_screen_content;
+    auto print = [&on_screen_content, &spaces, &col](const auto & values, const auto & justification)
+    {
+        uint64_t index = 0;
+        for (const auto & value : values)
+        {
+            std::ostringstream oss;
+            const auto max_len = spaces[index];
+            if (justification[index] == 1) // center
+            {
+                const auto left_len = std::max((max_len - value.length()) / 2, 0ul);
+                const auto right_len = std::max(max_len - left_len - value.length(), 0ul);
+                const std::string left(left_len, ' ');
+                const std::string right(right_len, ' ');
+                oss << left << value << right;
+            }
+            else if (justification[index] == 2) { // left
+                constexpr auto left_len = 1;
+                const auto right_len = std::max(static_cast<int>(max_len) - static_cast<int>(left_len) - static_cast<int>(value.length()), 0);
+                const std::string left(left_len, ' ');
+                const std::string right(right_len, ' ');
+                oss << left << value << right;
+            }
+            else if (justification[index] == 3) { // right
+                constexpr auto right_len = 1;
+                const auto left_len = std::max(static_cast<int>(max_len) - static_cast<int>(right_len) - static_cast<int>(value.length()), 0);
+                const std::string left(left_len, ' ');
+                const std::string right(right_len, ' ');
+                oss << left << value << right;
+            }
+            on_screen_content.push_back(oss.str());
+            index++;
+        }
+    };
+
+    auto show = [&]
+    {
+        int index = 0;
+        std::ostringstream oss;
+        std::ranges::for_each(on_screen_content, [&](const std::string & str) {
+            oss << "|" << str;
+            index++;
+        });
+        const auto before = oss.str().length();
+        oss << std::string(std::max(static_cast<int>(col) - static_cast<int>(before) - 1, 0), ' ') << "|";
+        std::cout << oss.str();
+    };
+
+    print(titles | std::views::keys, std::vector<int>(titles.size(), 1));
+    show(); on_screen_content.clear();
+    std::cout << std::endl;
+    if (col - 2 > 0) std::cout << "+" << std::string(col - 2, '-') << "+" << std::endl;
+
+    std::ranges::for_each(vales, [&](const std::vector<std::string> & value)
+    {
+        print(value, titles | std::views::values);
+        show(); on_screen_content.clear();
+        std::cout << std::endl;
+    });
+
+    std::cout << separator << std::endl;
+}
+
+#define gen_info(a, b) region_gen(a, b), blk_gen(a, b)
+
 /// Make a filesystem header
 /// @param file_size Total disk size
 /// @param block_size Block size
@@ -181,39 +278,33 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     head.runtime_info.mount_timestamp = head.runtime_info.last_check_timestamp = now;
 
     auto region_gen = [](const uint64_t start, const uint64_t end) {
-        return color::color(1,5,4) + "[" + std::to_string(start) + ", " + std::to_string(end) + ")" + color::color(3,3,3)
-        + " (" + std::to_string(end - start) + " block<s>)" + color::no_color();
+        return "[" + std::to_string(start) + ", " + std::to_string(end) + ")";
     };
 
-    const auto data_block_attribute = region_gen(head.static_info.data_block_attribute_table_start, head.static_info.data_block_attribute_table_end);
-    const auto data_bitmap_region = region_gen(head.static_info.data_bitmap_start, head.static_info.data_bitmap_end);
-    const auto data_bitmap_backup_region = region_gen(head.static_info.data_bitmap_backup_start, head.static_info.data_bitmap_backup_end);
-    const auto data_region = region_gen(head.static_info.data_table_start, head.static_info.data_table_end);
-    const auto journal_region = region_gen(head.static_info.journal_start, head.static_info.journal_end);
+    auto blk_gen = [](const uint64_t start, const uint64_t end) {
+        return std::to_string(end - start) + " block" + (end - start > 1 ? "s" : "");
+    };
 
-    cfs::log::cfs_logger.log(INFO_LOG);
-    cfs::log::cfs_logger.log("============================================ Disk Overview ============================================\n");
-    cfs::log::cfs_logger.log("               ", head.static_info.blocks, " blocks (addressable region: ", region_gen(0, head.static_info.blocks), ")\n");
-    cfs::log::cfs_logger.log(" Block size:   ", head.static_info.block_size, " bytes\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┬───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log(color::color(5,5,5), "              FILE SYSTEM HEAD │ BLOCK: ", region_gen(0, 1), "\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log(color::color(5,5,5), "            DATA REGION BITMAP │ BLOCK: ", data_bitmap_region, "\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log(color::color(5,5,5), "        DATA BITMAP BACKUP MAP │ BLOCK: ", data_bitmap_backup_region, "\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log(color::color(5,5,5), "          DATA BLOCK ATTRIBUTE │ BLOCK: ", data_block_attribute, "\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log(color::color(5,5,5), "                    DATA BLOCK │ BLOCK: ", data_region, "\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log(color::color(5,5,5), "                JOURNAL REGION │ BLOCK: ", journal_region, "\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log(color::color(5,5,5), "       FILE SYSTEM HEAD BACKUP │ BLOCK: ", region_gen(head.static_info.blocks - 1, head.static_info.blocks), "\n");
-    cfs::log::cfs_logger.log("  ─────────────────────────────┴───────────────────────────────────────────────────────────────────────\n");
-    cfs::log::cfs_logger.log("=======================================================================================================\n");
+    std::vector < std::vector < std::string > > lines;
+    std::vector<std::pair < std::string, int > > title = { { "Entry", 3 }, { "Region", 2 }, { "Block count", 2 } };
+    auto printLine = [&](const std::string & name, const std::string & line, const std::string & line2) {
+        lines.emplace_back(std::vector {name, line, line2});
+    };
 
+    printLine("Block size", std::to_string(head.static_info.block_size), "/");
+    printLine("Addressable region", gen_info(0, head.static_info.blocks));
+    printLine("FILE SYSTEM HEAD", gen_info(0, 1));
+    printLine("DATA REGION BITMAP", gen_info(head.static_info.data_bitmap_start, head.static_info.data_bitmap_end));
+    printLine("DATA BITMAP BACKUP", gen_info(head.static_info.data_bitmap_backup_start, head.static_info.data_bitmap_backup_end));
+    printLine("DATA BLOCK ATTRIBUTE", gen_info(head.static_info.data_block_attribute_table_start, head.static_info.data_block_attribute_table_end));
+    printLine("DATA BLOCK", gen_info(head.static_info.data_table_start, head.static_info.data_table_end));
+    printLine("JOURNAL REGION", gen_info(head.static_info.journal_start, head.static_info.journal_end));
+    printLine("FILE SYSTEM HEAD BACKUP", gen_info(head.static_info.blocks - 1, head.static_info.blocks));
+    print_table(title, lines, "Disk Overview");
     return head;
 }
+
+#undef gen_info
 
 void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_size, const std::string & label)
 {
@@ -225,14 +316,38 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, size_bytes) == 0, "fallocate() failed");
     assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, size_bytes) == 0, "fallocate() failed");
     close(fd);
+    ilog("Discarding finished\n");
+    {
+        basic_io::mmap file(path_to_block_file);
+        assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
+        ilog("Calculating CFS info...\n");
+        const auto head = make_head(file.size(), block_size, label);
+        ilog("Calculating CFS info done.\n");
+        ilog("Writing header to file...");
+        std::memcpy(file.data(), &head, sizeof(head)); // head
+        std::memcpy(file.data() + file.size() - sizeof(head), &head, sizeof(head)); // tail
+        ilog("done.\n");
+        file.close();
+    }
+    ilog("Set up bitmap..");
+    cfs::filesystem disk_file(path_to_block_file);
+    cfs::cfs_journaling_t journal(&disk_file);
+    cfs::cfs_bitmap_block_mirroring_t raid1_bitmap(&disk_file, &journal);
+    cfs::cfs_block_attribute_access_t attribute(&disk_file, &journal);
+    raid1_bitmap.set_bit(0, true);
 
-    basic_io::mmap file(path_to_block_file);
-    assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
-    const auto head = make_head(file.size(), block_size, label);
-    std::memcpy(file.data(), &head, sizeof(head)); // head
-    std::memcpy(file.data() + file.size() - sizeof(head), &head, sizeof(head)); // tail
+    cfs_block_attribute_t attr = {
+        .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+        .block_type = INDEX_NODE_BLOCK,
+        .block_type_cow = 0,
+        .allocation_oom_scan_per_refresh_count = 0,
+        .newly_allocated_thus_no_cow = 0,
+        .index_node_referencing_number = 1,
+    };
+    attribute.set(0, attr);
+    ilog("done.\n");
     ilog("CFS format complete\n");
-    file.close();
+    ilog("Sync data...\n");
 }
 
 void cfs::filesystem::block_shared_lock_t::bitmap_t::create(const uint64_t size)
@@ -276,82 +391,6 @@ void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t &
     // then, we load in
     fs_head->runtime_info = info;
     fs_end->runtime_info = info;
-}
-
-void cfs::filesystem::cfs_header_block_t::set_info(const std::string &name, const uint64_t field)
-{
-    std::lock_guard lock(mtx_);
-    auto info = load();
-    if (name == "mount_timestamp") {
-        info.mount_timestamp = field;
-    }
-    else if (name == "last_check_timestamp") {
-        info.last_check_timestamp = field;
-    }
-    else if (name == "last_check_timestamp") {
-        info.last_check_timestamp = field;
-    }  // last time check ran
-    else if (name == "snapshot_number") {
-        info.snapshot_number = field;
-    }
-    else if (name == "snapshot_number_cow") {
-        info.snapshot_number_cow = field;
-    }
-    else if (name == "allocation_bitmap_checksum") {
-        info.allocation_bitmap_checksum = field;
-    }
-    else if (name == "allocation_bitmap_checksum_cow") {
-        info.allocation_bitmap_checksum_cow = field;
-    }
-    else if (name == "flags") {
-        *(uint64_t*)&info.flags = field;
-    }
-    else if (name == "last_allocated_block") {
-        info.last_allocated_block = field;
-    }
-    else if (name == "allocated_non_cow_blocks") {
-        info.allocated_non_cow_blocks = field;
-    } else {
-        cfs_assert_simple(false);
-    }
-}
-
-uint64_t cfs::filesystem::cfs_header_block_t::get_info(const std::string &name)
-{
-    std::lock_guard lock(mtx_);
-    if (name == "mount_timestamp") {
-        return load().mount_timestamp;
-    }
-    if (name == "last_check_timestamp") {
-        return load().last_check_timestamp;
-    }
-    if (name == "last_check_timestamp") {
-        return load().last_check_timestamp;
-    }  // last time check ran
-    if (name == "snapshot_number") {
-        return load().snapshot_number;
-    }
-    if (name == "snapshot_number_cow") {
-        return load().snapshot_number_cow;
-    }
-    if (name == "allocation_bitmap_checksum") {
-        return load().allocation_bitmap_checksum;
-    }
-    if (name == "allocation_bitmap_checksum_cow") {
-        return load().allocation_bitmap_checksum_cow;
-    }
-    if (name == "flags") {
-        const auto flags = load().flags;
-        return *(uint64_t*)&flags;
-    }
-    if (name == "last_allocated_block") {
-        return load().last_allocated_block;
-    }
-    if (name == "allocated_non_cow_blocks") {
-        return load().allocated_non_cow_blocks;
-    }
-
-    cfs_assert_simple(false);
 }
 
 void cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)

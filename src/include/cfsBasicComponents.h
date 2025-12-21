@@ -128,6 +128,8 @@ namespace cfs
         cfs::filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
 
+        /// Small cache pool
+        /// @tparam static_cache_size Static cache size
         template < uint64_t static_cache_size >
         class static_cache_t
         {
@@ -137,59 +139,20 @@ namespace cfs
 
         public:
             /// initialize small cache pool
-            static_cache_t() {
-                bitmap_static_level_cache_.reserve(static_cache_size);
-            }
+            static_cache_t();
 
             /// set small cache pool
-            void set_fast_cache(const uint64_t index, const bool val)
-            {
-                std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
-                if (bitmap_static_level_cache_.size() > static_cache_size)
-                {
-                    std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
-                    for (auto ptr = bitmap_static_level_cache_.begin(); ptr != bitmap_static_level_cache_.end();++ptr)
-                    {
-                        if (auto acc = bitmap_static_level_access_counter_.find(ptr->first);
-                            acc == bitmap_static_level_access_counter_.end())
-                        {
-                            bitmap_static_level_cache_.erase(ptr);
-                        }
-                    }
+            /// @param index index
+            /// @param val Value
+            void set_fast_cache(uint64_t index, bool val);
 
-                    for (const auto & [pos, rate] : bitmap_static_level_access_counter_) {
-                        access_cache_.emplace_back(pos, rate);
-                    }
-
-                    std::ranges::sort(access_cache_,
-                                      [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
-                                          return a.second < b.second;
-                                      });
-                    access_cache_.resize(access_cache_.size() / 2);
-                    std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
-                        bitmap_static_level_cache_.erase(pos.first);
-                    });
-                    bitmap_static_level_access_counter_.clear();
-                }
-
-                bitmap_static_level_cache_[index] = val;
-            }
-
-            int get_fast_cache(const uint64_t index)
-            {
-                std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
-                const auto ptr = bitmap_static_level_cache_.find(index);
-                if (ptr == bitmap_static_level_cache_.end()) {
-                    return -1;
-                }
-
-                bitmap_static_level_access_counter_[index]++;
-                return ptr->second;
-            }
+            /// get small cache pool
+            /// @param index Index
+            /// @return -1 if not found, or 0/1 to indicate values
+            int get_fast_cache(uint64_t index);
         };
 
-        static_cache_t<4096> small_cache_;
-        static_cache_t<64 * 1024 * 1024> big_cache_;
+        static_cache_t<1024 * 1024 * 64> small_cache_;
 
     public:
         explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor, cfs_journaling_t * journal);
@@ -207,6 +170,60 @@ namespace cfs
         /// @throws cfs::error::assertion_failed Out of bounds
         void set_bit(uint64_t index, bool new_bit);
     };
+
+    template<uint64_t static_cache_size>
+    cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::static_cache_t() {
+        bitmap_static_level_cache_.reserve(static_cache_size);
+    }
+
+    template<uint64_t static_cache_size>
+    void cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::set_fast_cache(
+        const uint64_t index,
+        const bool val)
+    {
+        std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
+        if (bitmap_static_level_cache_.size() > static_cache_size)
+        {
+            std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
+            for (auto ptr = bitmap_static_level_cache_.begin(); ptr != bitmap_static_level_cache_.end();++ptr)
+            {
+                if (auto acc = bitmap_static_level_access_counter_.find(ptr->first);
+                    acc == bitmap_static_level_access_counter_.end())
+                {
+                    bitmap_static_level_cache_.erase(ptr);
+                }
+            }
+
+            for (const auto & [pos, rate] : bitmap_static_level_access_counter_) {
+                access_cache_.emplace_back(pos, rate);
+            }
+
+            std::ranges::sort(access_cache_,
+                              [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
+                                  return a.second < b.second;
+                              });
+            access_cache_.resize(access_cache_.size() / 2);
+            std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
+                bitmap_static_level_cache_.erase(pos.first);
+            });
+            bitmap_static_level_access_counter_.clear();
+        }
+
+        bitmap_static_level_cache_[index] = val;
+    }
+
+    template<uint64_t static_cache_size>
+    int cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::get_fast_cache(const uint64_t index)
+    {
+        std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
+        const auto ptr = bitmap_static_level_cache_.find(index);
+        if (ptr == bitmap_static_level_cache_.end()) {
+            return -1;
+        }
+
+        bitmap_static_level_access_counter_[index]++;
+        return ptr->second;
+    }
 
     class cfs_block_attribute_access_t {
         filesystem * parent_fs_governor_;
@@ -303,7 +320,7 @@ namespace cfs
         void deallocate(uint64_t index);
     };
 
-    template < typename F> concept Allocator_ = requires(F f) { { std::invoke(f) } -> std::same_as<uint64_t>; };
+    template < typename F> concept Allocator_ = requires(F f, const uint8_t c) { { std::invoke(f, c) } -> std::same_as<uint64_t>; };
     template < typename F> concept Deallocator_ = requires(F f, uint64_t index) {
         { std::invoke(f, index) } -> std::same_as<void>;
     };
@@ -362,14 +379,15 @@ namespace cfs
             uint64_t block_index_ = 0;
             bool control_ = true;
             bool allocated_by_smart_ = false;
+            uint8_t block_type_ = STORAGE_BLOCK;
 
             explicit smart_reallocate_t(
                 FuncAlloc alloc, FuncDealloc dealloc,
-                const uint64_t block_index, const bool control)
-            : alloc_(alloc), dealloc_(dealloc), block_index_(block_index), control_(control) { }
+                const uint64_t block_index, const bool control, const uint8_t block_type)
+            : alloc_(alloc), dealloc_(dealloc), block_index_(block_index), control_(control), block_type_(block_type) { }
 
             smart_reallocate_t(FuncAlloc alloc, FuncDealloc dealloc) : alloc_(alloc), dealloc_(dealloc) {
-                if (control_) { block_index_ = alloc(); allocated_by_smart_ = true; }
+                if (control_) { block_index_ = alloc(block_type_); allocated_by_smart_ = true; }
             }
 
             ~smart_reallocate_t() {

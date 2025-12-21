@@ -16,6 +16,7 @@ utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
     { .short_name = 'h', .long_name = "help",       .argument_required = false, .description = "Show help" },
     { .short_name = 'v', .long_name = "version",    .argument_required = false, .description = "Show version" },
     { .short_name = 'p', .long_name = "path",       .argument_required = true,  .description = "Path to CFS archive file" },
+    { .short_name = 'c', .long_name = "",           .argument_required = true,  .description = "Execute a CFS command" },
 };
 
 int main(int argc, char** argv)
@@ -66,7 +67,19 @@ int main(int argc, char** argv)
 
         if (parsed.contains("path")) {
             cfs::CowFileSystem CowFileSystem(parsed["path"]);
-            CowFileSystem.readline();
+            if (!parsed.contains('c')) {
+                CowFileSystem.readline();
+            } else {
+                const std::string cmd = parsed['c'];
+                std::stringstream ss(cmd);
+                std::vector<std::string> args;
+                while (!ss.eof()) {
+                    std::string word;
+                    ss >> word;
+                    args.push_back(word);
+                }
+                CowFileSystem.command_main_entry_point(args);
+            }
         } else {
             throw std::invalid_argument("Missing CFS file path");
         }

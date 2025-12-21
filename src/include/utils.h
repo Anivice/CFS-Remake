@@ -25,7 +25,7 @@ namespace cfs::utils
 
     /// Get Row and Column size from terminal
     /// @return Pair in [Col (x), Row (y)], or 80x25 if all possible attempt failed
-    std::pair < const int, const int > get_screen_col_row() noexcept;
+    std::pair < const int, const int > get_screen_row_col() noexcept;
 
     namespace arithmetic
     {
