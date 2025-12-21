@@ -8,6 +8,7 @@
 #include "tsl/hopscotch_map.h"
 
 make_simple_error_class(no_more_free_spaces)
+make_simple_error_class_traceable(tracer)
 
 #define auto_write_two_two(j, f, s_a, s_d, ss_a, ss_d, f_a, f_d)                        \
     cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
@@ -350,8 +351,10 @@ namespace cfs
         /// lock data block ID
         /// @param index data block ID
         /// @return page lock
-        [[nodiscard]] auto lock_page(const uint64_t index) const
-            { return parent_fs_governor_->lock(index + parent_fs_governor_->static_info_.data_table_start); }
+        [[nodiscard]] auto lock_page(const uint64_t index) const {
+            cfs_assert_simple(index != block_index_);
+            return parent_fs_governor_->lock(index + parent_fs_governor_->static_info_.data_table_start);
+        }
 
         /// copy-on-write for one block
         /// @param index Block index
@@ -376,7 +379,7 @@ namespace cfs
         public:
             FuncAlloc alloc_;
             FuncDealloc dealloc_;
-            uint64_t block_index_ = 0;
+            uint64_t block_index_ = UINT64_MAX;
             bool control_ = true;
             bool allocated_by_smart_ = false;
             uint8_t block_type_ = STORAGE_BLOCK;
@@ -386,7 +389,8 @@ namespace cfs
                 const uint64_t block_index, const bool control, const uint8_t block_type)
             : alloc_(alloc), dealloc_(dealloc), block_index_(block_index), control_(control), block_type_(block_type) { }
 
-            smart_reallocate_t(FuncAlloc alloc, FuncDealloc dealloc) : alloc_(alloc), dealloc_(dealloc) {
+            smart_reallocate_t(FuncAlloc alloc, FuncDealloc dealloc, const uint8_t block_type)
+            : alloc_(alloc), dealloc_(dealloc), block_type_(block_type) {
                 if (control_) { block_index_ = alloc(block_type_); allocated_by_smart_ = true; }
             }
 

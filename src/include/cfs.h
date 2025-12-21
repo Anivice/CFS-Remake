@@ -166,4 +166,6 @@ namespace cfs
 
 }
 
+#define debug_code(X) if(CFS_DEBUG) { X; }
+
 #endif //CFS_CFS_H

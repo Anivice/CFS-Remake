@@ -124,6 +124,7 @@ cfs::cfs_bitmap_block_mirroring_t::cfs_bitmap_block_mirroring_t(cfs::filesystem 
 
 bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 {
+    cfs_assert_simple(index < (parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start))
     if (const auto result = small_cache_.get_fast_cache(index); result != -1) {
         return result & 0x01;
     }
@@ -181,6 +182,7 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 
 void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool new_bit)
 {
+    cfs_assert_simple(index < (parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start))
     if (const auto result = small_cache_.get_fast_cache(index); result != -1) {
         if (new_bit == (result & 0x01)) return;
     }
@@ -427,7 +429,8 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
 
 uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index)
 {
-    if (!block_attribute_->get(index).newly_allocated_thus_no_cow)
+    auto attr = block_attribute_->get(index);
+    if (!attr.newly_allocated_thus_no_cow)
     {
         bool success = true;
         g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index);
@@ -442,6 +445,8 @@ uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index)
         return new_block;
     }
 
+    attr.newly_allocated_thus_no_cow = 0;
+    block_attribute_->set(index, attr);
     return -1;
 }
 
@@ -451,6 +456,7 @@ cfs::cfs_inode_service_t::linearized_block_t cfs::cfs_inode_service_t::linearize
     std::vector < uint64_t > level1_pointers;
 
     for (uint64_t i = 0; i < descriptor.level1_pointers; i++) {
+        debug_code(cfs_assert_simple(this->cfs_level_1_indexes[i] != 0));
         level1_pointers.push_back(this->cfs_level_1_indexes[i]);
     }
 
@@ -459,19 +465,31 @@ cfs::cfs_inode_service_t::linearized_block_t cfs::cfs_inode_service_t::linearize
         const std::vector < uint64_t > & upper)->std::vector < uint64_t >
     {
         std::vector < uint64_t > ret;
+        uint64_t index = 0;
         std::ranges::for_each(upper, [&](const uint64_t pointer)
         {
+            debug_code(cfs_assert_simple(pointer != 0));
             const auto lock = lock_page(pointer);
             const auto length = std::min(lock.size(), (pointers - ret.size()) * sizeof(uint64_t));
             std::vector < uint64_t > new_data;
             new_data.resize(length / sizeof(uint64_t), 0);
             std::memcpy(new_data.data(), lock.data(), length);
+            debug_code(for (const auto i : new_data) { if (i == 0) {
+                dlog("Tracer:\n", new_data, "\nupper:\n", upper, "\n");
+                dlog("Read data\n", ret, "\n");
+                throw error::tracer("blk index parent: ", pointer, ", nd_len=", length, ", index=", index,
+                    ", parent_blk_absolute=", pointer + parent_fs_governor_->static_info_.data_table_start,
+                    ", pointers_in_this_level=", pointers, ", struct stat::st_size=", this->cfs_inode_attribute->st_size);
+                };
+            })
             ret.insert_range(ret.end(), new_data);
+            index++;
         });
 
         return ret;
     };
 
+    dlog(std::string(utils::get_screen_row_col().second, 'X'), "\n", level1_pointers, "\n\n");
     const std::vector<uint64_t> level2_pointers = read_lower_by_upper_w_size(descriptor.level2_pointers, level1_pointers);
     const std::vector<uint64_t> level3_pointers = read_lower_by_upper_w_size(descriptor.level3_pointers, level2_pointers);
 
@@ -513,6 +531,7 @@ void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_blo
     auto alloc = [&](const uint8_t blk_type)->uint64_t {
         parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
         const auto blk = block_manager_->allocate();
+        debug_code(cfs_assert_simple(blk != 0))
         const cfs_block_attribute_t attr = {
             .block_status = 0,
             .block_type = blk_type,
@@ -542,47 +561,69 @@ void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_blo
     {
         std::vector<std::unique_ptr<smart_reallocate_func_t>> ret;
         std::ranges::for_each(list, [&](const uint64_t blk) {
-            ret.emplace_back(std::make_unique<smart_reallocate_func_t>(alloc, dealloc, blk, false, type));
+            debug_code(cfs_assert_simple(blk != 0))
+            ret.emplace_back(std::make_unique<smart_reallocate_func_t>(alloc, dealloc, blk, true, type));
         });
 
         return ret;
     };
 
-    auto allocate_automatically = [&](std::vector<std::unique_ptr<smart_reallocate_func_t>> & list)->void
+    auto allocate_automatically = [&](std::vector<std::unique_ptr<smart_reallocate_func_t>> & list, const uint8_t type)->void
     {
         std::ranges::for_each(list, [&](std::unique_ptr<smart_reallocate_func_t> & relc) {
             if (relc == nullptr) {
-                relc = std::make_unique<smart_reallocate_func_t>(alloc, dealloc);
+                relc = std::make_unique<smart_reallocate_func_t>(alloc, dealloc, type);
             }
+        });
+    };
+
+    auto check = [](const std::vector < uint64_t > & block) {
+        std::ranges::for_each(block, [&](const uint64_t relc) {
+            cfs_assert_simple(relc != 0);
+            cfs_assert_simple(relc != UINT64_MAX);
         });
     };
 
     auto [level1_vec, level2_vec, level3_vec] = linearize_all_blocks();
 
+    debug_code(check(level1_vec));
+    debug_code(check(level2_vec));
+    debug_code(check(level3_vec));
+
     std::vector<std::unique_ptr<smart_reallocate_func_t>> level1 = register_into_list(level1_vec, POINTER_BLOCK);
     std::vector<std::unique_ptr<smart_reallocate_func_t>> level2 = register_into_list(level2_vec, POINTER_BLOCK);
     std::vector<std::unique_ptr<smart_reallocate_func_t>> level3 = register_into_list(level3_vec, STORAGE_BLOCK);
-
-    set_control(level1, true);
-    set_control(level2, true);
-    set_control(level3, true);
 
     level1.resize(descriptor.level1_pointers);
     level2.resize(descriptor.level2_pointers);
     level3.resize(descriptor.level3_pointers);
 
-    allocate_automatically(level1);
-    allocate_automatically(level2);
-    allocate_automatically(level3);
+    allocate_automatically(level1, POINTER_BLOCK);
+    allocate_automatically(level2, POINTER_BLOCK);
+    allocate_automatically(level3, STORAGE_BLOCK);
 
     set_control(level1, false);
     set_control(level2, false);
     set_control(level3, false);
 
+    debug_code(
+        auto check_lvs = [](const std::vector<std::unique_ptr<smart_reallocate_func_t>> & lv) {
+            std::ranges::for_each(lv, [&](const std::unique_ptr<smart_reallocate_func_t> & relc) {
+                cfs_assert_simple(relc->block_index_ != 0);
+                std::cout << relc->block_index_ << " ";
+            });
+        };
+
+        std::cout << "Level1: "; check_lvs(level1); std::cout << std::endl;
+        std::cout << "Level2: "; check_lvs(level2); std::cout << std::endl;
+        std::cout << "Level3: "; check_lvs(level3); std::cout << std::endl;
+        )
+
     // record level 1 -> inode
     {
         int offset = 0;
         std::ranges::for_each(level1, [&](const std::unique_ptr<smart_reallocate_func_t> & relc) {
+            debug_code(cfs_assert_simple(relc->block_index_ != 0));
             this->cfs_level_1_indexes[offset++] = relc->block_index_;
         });
     }
@@ -591,33 +632,33 @@ void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_blo
         const std::vector<std::unique_ptr<smart_reallocate_func_t>> & upper,
         const std::vector<std::unique_ptr<smart_reallocate_func_t>> & lower)
     {
-        std::vector<uint64_t> block_data(block_size_ / sizeof(uint64_t)); // upper level block data
-        int offset = 0 /* current block offset */, block_offset = 0; // upper level offset
+        std::vector<uint64_t> block_data; // upper level block data
+        block_data.reserve(block_size_ / sizeof(uint64_t));
+        uint64_t block_offset = 0; // upper level offset
         bool found_allocator = false;
 
         auto save = [&]
         {
+            const auto parent_blk = upper[block_offset++]->block_index_;
             if (found_allocator)
             {
-                const auto parent_blk = upper[block_offset++]->block_index_;
                 copy_on_write(parent_blk);
                 const auto lock = lock_page(parent_blk);
-                std::memcpy(lock.data(), block_data.data(), block_size_);
+                std::memcpy(lock.data(), block_data.data(), block_data.size() * sizeof(uint64_t));
             }
 
             block_data.clear();
-            block_data.resize(block_size_ / sizeof(uint64_t), 0); // clear all
-            offset = 0;
             found_allocator = false;
         };
 
         std::ranges::for_each(lower, [&](const std::unique_ptr<smart_reallocate_func_t> & relc)
         {
-            block_data[offset++] = relc->block_index_;
+            debug_code(cfs_assert_simple(relc->block_index_ != 0));
+            block_data.push_back(relc->block_index_);
             if (relc->allocated_by_smart_) found_allocator = true;
 
             // block data full
-            if (offset == block_size_ / sizeof(uint64_t)) {
+            if (block_data.size() == (block_size_ / sizeof(uint64_t))) {
                 save();
             }
         });
@@ -689,7 +730,7 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const 
 
 uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, const uint64_t offset)
 {
-    if (this->cfs_inode_attribute->st_size < size + offset) {
+    if (this->cfs_inode_attribute->st_size < (size + offset)) {
         resize(size + offset); // append when short
     }
 
@@ -709,19 +750,25 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
 
     // write first page
     {
-        const auto lock1 = lock_page(level3[skipped_blocks]);
+        const auto target_blk = level3[skipped_blocks];
+        copy_on_write(target_blk);
+        const auto lock1 = lock_page(target_blk);
         copy_to_buffer(lock1.data(), bytes_to_write_in_the_first_block);
     }
 
     // write continuous
     for (uint64_t i = 1; i <= adjacent_full_blocks; i++) {
-        const auto lock = lock_page(level3[skipped_blocks + i]);
+        const auto target_blk = level3[skipped_blocks + i];
+        copy_on_write(target_blk);
+        const auto lock = lock_page(target_blk);
         copy_to_buffer(lock.data(), block_size_);
     }
 
     // write tail
     if (bytes_to_write_in_the_last_block != 0) {
-        const auto lock = lock_page(level3[skipped_blocks + adjacent_full_blocks + 1]);
+        const auto target_blk = level3[skipped_blocks + adjacent_full_blocks + 1];
+        copy_on_write(target_blk);
+        const auto lock = lock_page(target_blk);
         copy_to_buffer(lock.data(), bytes_to_write_in_the_last_block);
     }
 
@@ -730,10 +777,23 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
 
 void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
 {
+    if (new_size == this->cfs_inode_attribute->st_size) return; // skip size change if no size change is intended
     copy_on_write(block_index_);
     const auto descriptor = size_to_linearized_block_descriptor(new_size);
     commit_from_block_descriptor(descriptor);
     this->cfs_inode_attribute->st_size = static_cast<decltype(this->cfs_inode_attribute->st_size)>(new_size);
+
+    const auto [l1, l2, l3] = linearize_all_blocks();
+    auto check = [](const std::vector < uint64_t > & block) {
+        std::ranges::for_each(block, [&](const uint64_t relc) {
+            cfs_assert_simple(relc != 0);
+            cfs_assert_simple(relc != UINT64_MAX);
+        });
+    };
+
+    debug_code(check(l1));
+    debug_code(check(l2));
+    debug_code(check(l3));
 }
 
 void cfs::cfs_inode_service_t::chdev(const int dev)
