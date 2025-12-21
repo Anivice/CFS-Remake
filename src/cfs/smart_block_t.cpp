@@ -97,7 +97,7 @@ namespace solver
 
 }
 
-bool is_2_power_of(unsigned long long x)
+static bool is_2_power_of(unsigned long long x)
 {
     for (unsigned long long i = 1; i <= sizeof(x) * 8; i++)
     {
@@ -119,7 +119,7 @@ bool is_2_power_of(unsigned long long x)
 /// @param label FS label
 /// @return header
 /// @throws cfs::error::invalid_argument
-[[nodiscard]]
+[[nodiscard]] static
 cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, const std::string & label)
 {
     using namespace cfs;
@@ -171,7 +171,7 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     block_offset += data_blocks;
 
     head.static_info.journal_start = block_offset;
-    head.static_info.journal_end   = head.static_info.blocks - 2;
+    head.static_info.journal_end   = head.static_info.blocks - 1;
 
     // ────── checksum & timestamps ──────
     head.static_info_checksum = head.static_info_checksum_dup = utils::arithmetic::hashcrc64(head.static_info);
@@ -191,25 +191,26 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     const auto data_region = region_gen(head.static_info.data_table_start, head.static_info.data_table_end);
     const auto journal_region = region_gen(head.static_info.journal_start, head.static_info.journal_end);
 
-    ilog("============================================ Disk Overview ============================================\n");
-    ilog("               ", head.static_info.blocks, " blocks (addressable region: ", region_gen(0, head.static_info.blocks), ")\n");
-    ilog(" Block size:   ", head.static_info.block_size, " bytes\n");
-    ilog("  ─────────────────────────────┬───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "              FILE SYSTEM HEAD │ BLOCK: ", region_gen(0, 1), "\n");
-    ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "            DATA REGION BITMAP │ BLOCK: ", data_bitmap_region, "\n");
-    ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "        DATA BITMAP BACKUP MAP │ BLOCK: ", data_bitmap_backup_region, "\n");
-    ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "          DATA BLOCK ATTRIBUTE │ BLOCK: ", data_block_attribute, "\n");
-    ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "                    DATA BLOCK │ BLOCK: ", data_region, "\n");
-    ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "                JOURNAL REGION │ BLOCK: ", journal_region, "\n");
-    ilog("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
-    ilog(color::color(5,5,5), "       FILE SYSTEM HEAD BACKUP │ BLOCK: ", region_gen(head.static_info.blocks - 1, head.static_info.blocks), "\n");
-    ilog("  ─────────────────────────────┴───────────────────────────────────────────────────────────────────────\n");
-    ilog("=======================================================================================================\n");
+    cfs::log::cfs_logger.log(INFO_LOG);
+    cfs::log::cfs_logger.log("============================================ Disk Overview ============================================\n");
+    cfs::log::cfs_logger.log("               ", head.static_info.blocks, " blocks (addressable region: ", region_gen(0, head.static_info.blocks), ")\n");
+    cfs::log::cfs_logger.log(" Block size:   ", head.static_info.block_size, " bytes\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┬───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log(color::color(5,5,5), "              FILE SYSTEM HEAD │ BLOCK: ", region_gen(0, 1), "\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log(color::color(5,5,5), "            DATA REGION BITMAP │ BLOCK: ", data_bitmap_region, "\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log(color::color(5,5,5), "        DATA BITMAP BACKUP MAP │ BLOCK: ", data_bitmap_backup_region, "\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log(color::color(5,5,5), "          DATA BLOCK ATTRIBUTE │ BLOCK: ", data_block_attribute, "\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log(color::color(5,5,5), "                    DATA BLOCK │ BLOCK: ", data_region, "\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log(color::color(5,5,5), "                JOURNAL REGION │ BLOCK: ", journal_region, "\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┼───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log(color::color(5,5,5), "       FILE SYSTEM HEAD BACKUP │ BLOCK: ", region_gen(head.static_info.blocks - 1, head.static_info.blocks), "\n");
+    cfs::log::cfs_logger.log("  ─────────────────────────────┴───────────────────────────────────────────────────────────────────────\n");
+    cfs::log::cfs_logger.log("=======================================================================================================\n");
 
     return head;
 }

@@ -252,64 +252,18 @@ namespace cfs
         void deallocate(uint64_t index);
     };
 
-    class cfs_copy_on_write_data_block_t
-    {
-        filesystem * parent_fs_governor_;
-        cfs_block_manager_t * block_manager_;
-        cfs_journaling_t * journal_;
-        cfs_block_attribute_access_t * block_attribute_;
-        std::map < uint64_t, std::mutex > inode_locks;
-
-    public:
-        explicit cfs_copy_on_write_data_block_t(
-                filesystem * parent_fs_governor,
-                cfs_block_manager_t * block_manager,
-                cfs_journaling_t * journal,
-                cfs_block_attribute_access_t * block_attribute
-            )
-        :
-        parent_fs_governor_(parent_fs_governor),
-        block_manager_(block_manager),
-        journal_(journal),
-        block_attribute_(block_attribute)
-        { }
-
-    private:
-        [[nodiscard]] auto lock_page(const uint64_t index) const
-            { return parent_fs_governor_->lock(index); }
-        [[nodiscard]] auto lock_page(const uint64_t start, const uint64_t end) const
-            { return parent_fs_governor_->lock(start, end); }
-
-    public:
-
-        /// copy-on-write for one block
-        /// @param index Block index
-        /// @return Redundancy block index
-        uint64_t copy_on_write(const uint64_t index)
-        {
-            if (!block_attribute_->get(index).newly_allocated_thus_no_cow)
-            {
-                bool success = true;
-                g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index);
-                const auto new_block = block_manager_->allocate();
-                const auto new_ = lock_page(new_block);
-                const auto old_ = lock_page(index);
-                std::memcpy(new_.data(), old_.data(), old_.size());
-                return new_block;
-            }
-
-            return -1;
-        }
+    template < typename F> concept Allocator_ = requires(F f) { { std::invoke(f) } -> std::same_as<uint64_t>; };
+    template < typename F> concept Deallocator_ = requires(F f, uint64_t index) {
+        { std::invoke(f, index) } -> std::same_as<void>;
     };
 
     class cfs_inode_service_t : protected cfs_inode_t
     {
-        filesystem::guard inode_effective_lock;
+        filesystem::guard inode_effective_lock_;
         filesystem * parent_fs_governor_;
         cfs_block_manager_t * block_manager_;
         cfs_journaling_t * journal_;
         cfs_block_attribute_access_t * block_attribute_;
-        cfs_copy_on_write_data_block_t * cow_;
         const uint64_t block_size_;
         const uint64_t block_index_;
 
@@ -325,38 +279,38 @@ namespace cfs
             uint64_t level3_pointers;
         };
 
-        [[nodiscard]] linearized_block_t linearize_all_blocks();
+        /// lock data block ID
+        /// @param index data block ID
+        /// @return page lock
+        [[nodiscard]] auto lock_page(const uint64_t index) const
+            { return parent_fs_governor_->lock(index + parent_fs_governor_->static_info_.data_table_start); }
 
-        [[nodiscard]] linearized_block_descriptor_t size_to_linearized_block_descriptor(const uint64_t size) const
-        {
-            auto blocks_requires_for_this_many_pointers = [&](const uint64_t pointers)->uint64_t {
-                return cfs::utils::arithmetic::count_cell_with_cell_size(
-                    block_size_ / sizeof(uint64_t), // how many pointers can a storage hold?
-                    pointers); // this many pointers
-            };
-            linearized_block_t linearized_block;
-            /// basically, how many storage blocks, i.e., level 3 blocks
-            const uint64_t required_level3_blocks = cfs::utils::arithmetic::count_cell_with_cell_size(block_size_, size);
-            const uint64_t required_level2_blocks = blocks_requires_for_this_many_pointers(required_level3_blocks);
-            const uint64_t required_level1_blocks = blocks_requires_for_this_many_pointers(required_level2_blocks);
-            if (required_level1_blocks > cfs_level_1_index_numbers) {
-                throw error::no_more_free_spaces("Max file size more than inode can hold");
-            }
+        /// copy-on-write for one block
+        /// @param index Block index
+        /// @return Redundancy block index
+        uint64_t copy_on_write(uint64_t index);
 
-            return {
-                .level1_pointers = required_level1_blocks,
-                .level2_pointers = required_level2_blocks,
-                .level3_pointers = required_level3_blocks
-            };
-        }
+    public:
 
-        template < typename FuncAlloc, typename FuncDealloc >
+        /// Linearize all blocks by st_size
+        /// @return linearized pointers in std::vector <uint64_t> * 3 struct
+        [[nodiscard]] linearized_block_t linearize_all_blocks() const;
+
+        /// calculate how many pointers for each level
+        /// @return pointers required for each level for this particular size
+        [[nodiscard]] linearized_block_descriptor_t size_to_linearized_block_descriptor(uint64_t size) const;
+
+        /// Smart allocator and deallocator
+        /// @tparam FuncAlloc Allocator
+        /// @tparam FuncDealloc Deallocator
+        template < Allocator_ FuncAlloc, Deallocator_ FuncDealloc >
         class smart_reallocate_t {
         public:
             FuncAlloc alloc_;
             FuncDealloc dealloc_;
             uint64_t block_index_ = 0;
             bool control_ = true;
+            bool allocated_by_smart_ = false;
 
             explicit smart_reallocate_t(
                 FuncAlloc alloc, FuncDealloc dealloc,
@@ -364,7 +318,7 @@ namespace cfs
             : alloc_(alloc), dealloc_(dealloc), block_index_(block_index), control_(control) { }
 
             smart_reallocate_t(FuncAlloc alloc, FuncDealloc dealloc) : alloc_(alloc), dealloc_(dealloc) {
-                if (control_) { block_index_ = alloc(); }
+                if (control_) { block_index_ = alloc(); allocated_by_smart_ = true; }
             }
 
             ~smart_reallocate_t() {
@@ -372,47 +326,7 @@ namespace cfs
             }
         };
 
-        void commit_from_block_descriptor(const linearized_block_descriptor_t & descriptor)
-        {
-            auto alloc = [&] { return block_manager_->allocate(); };
-            auto dealloc = [&](const uint64_t index) { return block_manager_->deallocate(index); };
-            using smart_reallocate_func_t = smart_reallocate_t<decltype(alloc), decltype(dealloc)>;
-
-            auto set_control = [](std::vector<std::unique_ptr<smart_reallocate_func_t>> & ctrl, const bool control)
-            {
-                std::ranges::for_each(ctrl, [&](const std::unique_ptr<smart_reallocate_func_t> & relc) {
-                    relc->control_ = control;
-                });
-            };
-
-            auto register_into_list = [&](const std::vector < uint64_t > & list)->std::vector<std::unique_ptr<smart_reallocate_func_t>>
-            {
-                std::vector<std::unique_ptr<smart_reallocate_func_t>> ret;
-                std::ranges::for_each(list, [&](const uint64_t blk) {
-                    ret.emplace_back(std::make_unique<smart_reallocate_func_t>(alloc, dealloc, blk, false));
-                });
-
-                return ret;
-            };
-
-            auto [level1_vec, level2_vec, level3_vec] = linearize_all_blocks();
-
-            std::vector<std::unique_ptr<smart_reallocate_func_t>> level1 = register_into_list(level1_vec);
-            std::vector<std::unique_ptr<smart_reallocate_func_t>> level2 = register_into_list(level2_vec);
-            std::vector<std::unique_ptr<smart_reallocate_func_t>> level3 = register_into_list(level3_vec);
-
-            set_control(level1, true);
-            set_control(level2, true);
-            set_control(level3, true);
-
-            level1.resize(descriptor.level1_pointers);
-            level2.resize(descriptor.level2_pointers);
-            level3.resize(descriptor.level3_pointers);
-
-            set_control(level1, false);
-            set_control(level2, false);
-            set_control(level3, false);
-        }
+        void commit_from_block_descriptor(const linearized_block_descriptor_t & descriptor);
 
     public:
         cfs_inode_service_t(
@@ -420,11 +334,14 @@ namespace cfs
             filesystem * parent_fs_governor,
             cfs_block_manager_t * block_manager,
             cfs_journaling_t * journal,
-            cfs_block_attribute_access_t * block_attribute,
-            cfs_copy_on_write_data_block_t * cow);
+            cfs_block_attribute_access_t * block_attribute);
 
-        uint64_t read(char * data, uint64_t size, uint64_t offset);
+        uint64_t read(char * data, uint64_t size, uint64_t offset) const;
         uint64_t write(const char * data, uint64_t size, uint64_t offset);
+
+        /// resize this inode
+        /// @param new_size New size
+        void resize(uint64_t new_size);
 
         void chdev(int dev);
         void chrdev(dev_t dev);
@@ -445,8 +362,7 @@ namespace cfs
             filesystem * parent_fs_governor,
             cfs_block_manager_t * block_manager,
             cfs_journaling_t * journal,
-            cfs_block_attribute_access_t * block_attribute,
-            cfs_copy_on_write_data_block_t * cow);
+            cfs_block_attribute_access_t * block_attribute);
 
         /// create an inode under current directory
         cfs_inode_service_t make_inode(const std::string & name);
