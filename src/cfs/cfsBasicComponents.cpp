@@ -122,48 +122,14 @@ cfs::cfs_bitmap_block_mirroring_t::cfs_bitmap_block_mirroring_t(cfs::filesystem 
 {
 }
 
-void cfs::cfs_bitmap_block_mirroring_t::add_cache(const uint64_t index, const bool new_bit)
-{
-    std::lock_guard cpp_guard_(mutex_);
-    constexpr uint64_t max_map_size = 1024 * 1024 * 16;
-    if (bit_cache_.size() > max_map_size)
-    {
-        std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
-        for (const auto & pos : bit_cache_ | std::views::keys)
-        {
-            if (auto acc = access_counter_.find(pos); acc == access_counter_.end()) {
-                access_counter_.emplace(pos, 0);
-            }
-        }
-
-        for (const auto & [pos, rate] : access_counter_) {
-            access_cache_.emplace_back(pos, rate);
-        }
-
-        std::ranges::sort(access_cache_,
-                          [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
-                              return a.second < b.second;
-                          });
-        access_cache_.resize(access_cache_.size() - (max_map_size / 2));
-        std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
-            bit_cache_.erase(pos.first);
-        });
-        access_counter_.clear();
-    }
-
-    bit_cache_[index] = new_bit;
-}
-
 bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 {
-    {
-        // check for cache pool
-        std::lock_guard cpp_guard_(mutex_);
-        access_counter_[index]++;
-        const auto ptr = bit_cache_.find(index);
-        if (ptr != bit_cache_.end()) {
-            return ptr->second;
-        }
+    if (const auto result = small_cache_.get_fast_cache(index); result != -1) {
+        return result & 0x01;
+    }
+
+    if (const auto result = big_cache_.get_fast_cache(index); result != -1) {
+        return result & 0x01;
     }
 
     // huge multipage state lock (really slow, so it'd better be in cache pool)
@@ -213,24 +179,19 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
         wlog("Attempted fix finished and assumed fine\n");
     }
 
-    // if (const auto ptr = debug_map_.find(index); ptr != debug_map_.end()) cfs_assert_simple(ptr->second == map1);
-    add_cache(index, map1);
+    small_cache_.set_fast_cache(index, map1);
+    big_cache_.set_fast_cache(index, map1);
     return map1;
 }
 
 void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool new_bit)
 {
-    {
-        // check for cache pool
-        std::lock_guard cpp_guard_(mutex_);
-        access_counter_[index]++;
-        const auto ptr = bit_cache_.find(index);
-        if (ptr != bit_cache_.end())
-        {
-            if (new_bit == ptr->second) {
-                return; // unchanged, so just skip
-            }
-        }
+    if (const auto result = small_cache_.get_fast_cache(index); result != -1) {
+        if (new_bit == (result & 0x01)) return;
+    }
+
+    if (const auto result = big_cache_.get_fast_cache(index); result != -1) {
+        if (new_bit == (result & 0x01)) return;
     }
 
     const auto original = this->get_bit(index);
@@ -243,7 +204,9 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
     mirror1.set_bit(index, new_bit, false);
     mirror2.set_bit(index, new_bit, false);
 
-    add_cache(index, new_bit);
+    small_cache_.set_fast_cache(index, new_bit);
+    big_cache_.set_fast_cache(index, new_bit);
+
     auto & header_runtime = parent_fs_governor_->cfs_header_block;
     header_runtime.set_info("allocation_bitmap_checksum_cow", header_runtime.get_info("allocation_bitmap_checksum"));
     header_runtime.set_info("allocation_bitmap_checksum", mirror1.dump_crc64());

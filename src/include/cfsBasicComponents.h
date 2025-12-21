@@ -5,6 +5,7 @@
 #include "commandTemplateTree.h"
 #include "smart_block_t.h"
 #include "generalCFSbaseError.h"
+#include "tsl/hopscotch_map.h"
 
 make_simple_error_class(no_more_free_spaces)
 
@@ -127,19 +128,71 @@ namespace cfs
         cfs::filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
 
-        std::atomic_int64_t last_get = -1;
+        template < uint64_t static_cache_size >
+        class static_cache_t
+        {
+            tsl::hopscotch_map < uint64_t, bool > bitmap_static_level_cache_;
+            tsl::hopscotch_map < uint64_t, uint64_t > bitmap_static_level_access_counter_;
+            std::mutex static_level_cache_mtx_;
 
-        std::map < uint64_t, bool > bit_cache_;
-        std::map < uint64_t, uint64_t > access_counter_;
-        std::mutex mutex_;
+        public:
+            /// initialize small cache pool
+            static_cache_t() {
+                bitmap_static_level_cache_.reserve(static_cache_size);
+            }
+
+            /// set small cache pool
+            void set_fast_cache(const uint64_t index, const bool val)
+            {
+                std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
+                if (bitmap_static_level_cache_.size() > static_cache_size)
+                {
+                    std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
+                    for (auto ptr = bitmap_static_level_cache_.begin(); ptr != bitmap_static_level_cache_.end();++ptr)
+                    {
+                        if (auto acc = bitmap_static_level_access_counter_.find(ptr->first);
+                            acc == bitmap_static_level_access_counter_.end())
+                        {
+                            bitmap_static_level_cache_.erase(ptr);
+                        }
+                    }
+
+                    for (const auto & [pos, rate] : bitmap_static_level_access_counter_) {
+                        access_cache_.emplace_back(pos, rate);
+                    }
+
+                    std::ranges::sort(access_cache_,
+                                      [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
+                                          return a.second < b.second;
+                                      });
+                    access_cache_.resize(access_cache_.size() / 2);
+                    std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
+                        bitmap_static_level_cache_.erase(pos.first);
+                    });
+                    bitmap_static_level_access_counter_.clear();
+                }
+
+                bitmap_static_level_cache_[index] = val;
+            }
+
+            int get_fast_cache(const uint64_t index)
+            {
+                std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
+                const auto ptr = bitmap_static_level_cache_.find(index);
+                if (ptr == bitmap_static_level_cache_.end()) {
+                    return -1;
+                }
+
+                bitmap_static_level_access_counter_[index]++;
+                return ptr->second;
+            }
+        };
+
+        static_cache_t<4096> small_cache_;
+        static_cache_t<64 * 1024 * 1024> big_cache_;
 
     public:
         explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor, cfs_journaling_t * journal);
-
-        /// Add index into cache pool
-        /// @param index index
-        /// @param new_bit New bit
-        void add_cache(uint64_t index, bool new_bit);
 
         /// Get bit at the specific location
         /// @param index Bit Index
@@ -153,8 +206,6 @@ namespace cfs
         /// @return NONE
         /// @throws cfs::error::assertion_failed Out of bounds
         void set_bit(uint64_t index, bool new_bit);
-
-        // std::map < uint64_t, bool > debug_map_;
     };
 
     class cfs_block_attribute_access_t {
