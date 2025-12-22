@@ -76,7 +76,10 @@ int main(int argc, char** argv)
                 while (!ss.eof()) {
                     std::string word;
                     ss >> word;
-                    args.push_back(word);
+                    if (!word.empty())
+                        args.push_back(word);
+                    else
+                        break;
                 }
                 CowFileSystem.command_main_entry_point(args);
             }

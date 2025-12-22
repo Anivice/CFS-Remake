@@ -268,6 +268,8 @@ namespace cfs
         [[nodiscard]] smart_lock_t lock(const uint64_t index) { return smart_lock_t(this, index); }
 
     public:
+        cfs_block_attribute_t get(const uint64_t index) { return *lock(index); }
+
         template < typename Type >
         requires (std::is_same_v<Type, block_status>
             || std::is_same_v<Type, block_type>

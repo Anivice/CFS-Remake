@@ -28,7 +28,7 @@ std::string print_attribute(const uint32_t val)
     const auto * attr_ = (cfs::cfs_block_attribute_t *)&val;
     const auto & attr = *attr_;
     std::stringstream ss;
-    ss << "     Status: ";
+    ss << "     Status:             ";
     switch (attr.block_status) {
         case cfs::BLOCK_AVAILABLE_TO_MODIFY_0x00: ss << "Normal"; break;
         case cfs::BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01: ss << "Snapshot Entry Point"; break;
@@ -174,7 +174,7 @@ namespace cfs
         }
         else if (vec.front() == "debug" && vec.size() >= 2)
         {
-            if (vec[1] == "cat" && vec.size() == 3)
+            if (vec[1] == "cat" && vec.size() >= 3)
             {
                 if (vec[2] == "bitmap")
                 {
@@ -223,8 +223,19 @@ namespace cfs
                         std::cout << translate_action_into_literal(action) << std::endl;
                     });
                 }
+                else if (vec[2] == "attribute" && vec.size() == 4)
+                {
+                    const auto loc = vec[3];
+                    const auto pos = std::strtol(loc.c_str(), nullptr, 10);
+                    const auto attr = block_attribute_.get(pos);
+                    if (!mirrored_bitmap_.get_bit(pos)) wlog("Not allocated!\n");
+                    std::cout << print_attribute(*(uint32_t*)&attr) << std::endl;
+                }
+                else {
+                    elog("Failed to parse command\n");
+                }
             }
-            if (vec[1] == "check" && vec.size() == 3)
+            else if (vec[1] == "check" && vec.size() == 3)
             {
                 if (vec[2] == "block_hash5")
                 {
@@ -242,6 +253,12 @@ namespace cfs
                         }
                     }
                 }
+                else {
+                    elog("Failed to parse command\n");
+                }
+            }
+            else {
+                elog("Failed to parse command\n");
             }
         }
 
