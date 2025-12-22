@@ -629,6 +629,7 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                 const auto parent_blk_lock = lock_page(new_parent, true);
                 if (new_parent != parent_blk)
                 {
+                    block_attribute_->set<block_type>(new_parent, POINTER_BLOCK);
                     upper[block_offset].second = true;
                     upper[block_offset].first = new_parent;
                 }
