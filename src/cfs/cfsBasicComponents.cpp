@@ -427,6 +427,33 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
     success = true;
 }
 
+cfs::cfs_inode_service_t::page_locker_t::page_locker_t(const uint64_t index, filesystem *fs,
+    cfs_inode_service_t *parent): lock_(fs->lock(index + fs->static_info_.data_table_start)), parent_(parent), index_(index)
+{
+    before_.resize(lock_.size());
+    std::memcpy(before_.data(), lock_.data(), lock_.size());
+}
+
+cfs::cfs_inode_service_t::page_locker_t::~page_locker_t()
+{
+    if (!!std::memcpy(before_.data(), lock_.data(), lock_.size()))
+    {
+        parent_->block_attribute_->set<block_checksum>(index_,
+            utils::arithmetic::hash5(reinterpret_cast<uint8_t *>(lock_.data()), lock_.size())
+        );
+    }
+}
+
+auto cfs::cfs_inode_service_t::lock_page(const uint64_t index, const bool linker)
+{
+    cfs_assert_simple(index != block_index_
+        && index < (parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start));
+    if (!linker && block_attribute_->get<block_type>(index) == POINTER_BLOCK) {
+        throw cfs::error::assertion_failed("Attempt to read pointer without stating as linker");
+    }
+    return page_locker_t(index, parent_fs_governor_, this);
+}
+
 uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const bool linker)
 {
     cfs_assert_simple(index != block_index_); // can't CoW on my own. this should be done by dentry

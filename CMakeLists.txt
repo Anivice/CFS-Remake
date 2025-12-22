@@ -131,6 +131,8 @@ add_library(cfs_obj STATIC                      src/include/cfs.h
         src/cfs/CowFileSystem.cpp               src/include/CowFileSystem.h
         ${CMAKE_BINARY_DIR}/version.cpp         ${CMAKE_BINARY_DIR}/version.h
         ${CMAKE_BINARY_DIR}/cfs_command.cpp     ${CMAKE_BINARY_DIR}/cfs_command.h
+        src/cfs/inode.cpp
+        src/include/inode.h
 )
 target_link_libraries(cfs_obj PUBLIC atomic)
 
