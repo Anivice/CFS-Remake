@@ -809,20 +809,18 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
 
     if (!relink_map.empty())
     {
-        auto replace = [](const uint64_t target, const uint64_t replacement, decltype(allocation_descriptor.level3_pointers) & list)
-        {
-            auto ptr = std::ranges::find(list, std::make_pair(target, false));
-            cfs_assert_simple(ptr != list.end());
-            ptr->first = replacement;
-            ptr->second = true;
-        };
+        decltype(allocation_descriptor.level3_pointers) level3_pointers = allocation_descriptor.level3_pointers;
 
         // relink all level 3 blocks
-        for (const auto [before, after] : relink_map) {
-            replace(before, after, allocation_descriptor.level3_pointers);
-        }
+        std::ranges::for_each(allocation_descriptor.level3_pointers, [&](std::pair <uint64_t, bool> & ptr)
+        {
+            if (const auto it = relink_map.find(ptr.first); it != relink_map.end()) {
+                ptr.first = it->second; // replace parent
+                ptr.second = true; // mark as reallocated
+            }
+        });
 
-        // commit change
+        // commit changes
         commit_from_linearized_block(allocation_descriptor);
     }
 

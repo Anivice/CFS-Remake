@@ -672,6 +672,12 @@ namespace cfs
         public:
             const filesystem::guard * operator->() const { return &lock_; }
 
+            /**
+             * Automatic page lock
+             * @param index Page index
+             * @param fs Filesystem manager
+             * @param parent Service parent
+             */
             page_locker_t(
                 const uint64_t index,
                 filesystem * fs,
@@ -682,6 +688,7 @@ namespace cfs
                 std::memcpy(before_.data(), lock_.data(), lock_.size());
             }
 
+            /// page destructor, automatically commit checksum changes
             ~page_locker_t()
             {
                 if (!!std::memcpy(before_.data(), lock_.data(), lock_.size())) {
