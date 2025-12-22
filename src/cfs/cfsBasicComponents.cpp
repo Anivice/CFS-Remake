@@ -443,6 +443,9 @@ uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const boo
         const auto new_ = lock_page(new_block, linker);
         const auto old_ = lock_page(index, linker);
         std::memcpy(new_->data(), old_->data(), block_size_);
+
+        block_attribute_->move<block_type, block_type_cow>(index); // move block type in old one to cow backup
+        block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one aas freeable CoW redundancy
         return new_block;
     }
 
@@ -749,6 +752,8 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
     }
 
     const auto [level1, level2, level3] = linearize_all_blocks();
+    allocation_map_t allocation_descriptor;
+    tsl::hopscotch_map<uint64_t, uint64_t> relink_map;
     const auto skipped_blocks = offset / block_size_;
     const auto skipped_bytes = offset % block_size_;
     const auto bytes_to_write_in_the_first_block = std::min(size - skipped_bytes, block_size_ - skipped_bytes);
@@ -762,28 +767,66 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
         global_write_offset += r_size;
     };
 
+    auto cow_write = [&](const uint64_t index, const uint64_t w_size)
+    {
+        const auto new_blk = copy_on_write(index);
+        if (new_blk != index) {
+            // relink
+            relink_map.emplace(index, new_blk);
+        }
+
+        const auto lock = lock_page(new_blk);
+        copy_to_buffer(lock->data(), w_size);
+    };
+
+    auto init_alloc_map_from_vec = [&](const std::vector<uint64_t> & list,
+        decltype(allocation_map_t::level1_pointers) & pointer_list)
+    {
+        std::ranges::for_each(list, [&](const uint64_t ptr) {
+            pointer_list.emplace_back(ptr, false);
+        });
+    };
+
+    // init allocation map
+    init_alloc_map_from_vec(level1, allocation_descriptor.level1_pointers);
+    init_alloc_map_from_vec(level2, allocation_descriptor.level2_pointers);
+    init_alloc_map_from_vec(level3, allocation_descriptor.level3_pointers);
+
     // write first page
     {
         const auto target_blk = level3[skipped_blocks];
-        copy_on_write(target_blk);
-        const auto lock1 = lock_page(target_blk);
-        copy_to_buffer(lock1->data(), bytes_to_write_in_the_first_block);
+        cow_write(target_blk, bytes_to_write_in_the_first_block);
     }
 
     // write continuous
     for (uint64_t i = 1; i <= adjacent_full_blocks; i++) {
         const auto target_blk = level3[skipped_blocks + i];
-        copy_on_write(target_blk);
-        const auto lock = lock_page(target_blk);
-        copy_to_buffer(lock->data(), block_size_);
+        cow_write(target_blk, block_size_);
     }
 
     // write tail
     if (bytes_to_write_in_the_last_block != 0) {
         const auto target_blk = level3[skipped_blocks + adjacent_full_blocks + 1];
-        copy_on_write(target_blk);
-        const auto lock = lock_page(target_blk);
-        copy_to_buffer(lock->data(), bytes_to_write_in_the_last_block);
+        cow_write(target_blk, bytes_to_write_in_the_last_block);
+    }
+
+    if (!relink_map.empty())
+    {
+        auto replace = [](const uint64_t target, const uint64_t replacement, decltype(allocation_descriptor.level3_pointers) & list)
+        {
+            auto ptr = std::ranges::find(list, std::make_pair(target, false));
+            cfs_assert_simple(ptr != list.end());
+            ptr->first = replacement;
+            ptr->second = true;
+        };
+
+        // relink all level 3 blocks
+        for (const auto [before, after] : relink_map) {
+            replace(before, after, allocation_descriptor.level3_pointers);
+        }
+
+        // commit change
+        commit_from_linearized_block(allocation_descriptor);
     }
 
     return global_write_offset;
