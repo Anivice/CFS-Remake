@@ -64,7 +64,7 @@ int main(int argc, char ** argv)
             dlog("Iteration i=", i, " finished\n");
         }
 
-        inode.inode_copy_on_write();
+        inode.inode_copy_on_write(1);
     }
     catch (cfs::error::generalCFSbaseError & e) {
         elog(e.what(), "\n");

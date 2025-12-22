@@ -197,35 +197,6 @@ cfs::cfs_block_attribute_access_t::smart_lock_t::~smart_lock_t()
     parent_->location_lock_.unlock(index_);
 }
 
-// cfs::cfs_block_attribute_t cfs::cfs_block_attribute_access_t::get(const uint64_t index)
-// {
-//     const auto offset = index * sizeof(cfs_block_attribute_t);
-//     const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
-//     const auto page = offset / parent_fs_governor_->static_info_.block_size +
-//                       parent_fs_governor_->static_info_.data_block_attribute_table_start;
-//     cfs_block_attribute_t ret {};
-//     const auto lock = parent_fs_governor_->lock(page);
-//     std::memcpy(&ret, lock.data() + in_page_offset, sizeof(ret));
-//     return ret;
-// }
-
-// void cfs::cfs_block_attribute_access_t::set(const uint64_t index, const cfs_block_attribute_t attr)
-// {
-//     const auto offset = index * sizeof(cfs_block_attribute_t);
-//     const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
-//     const auto page = offset / parent_fs_governor_->static_info_.block_size +
-//                       parent_fs_governor_->static_info_.data_block_attribute_table_start;
-//     cfs_block_attribute_t original {};
-//     const auto lock = parent_fs_governor_->lock(page);
-//     std::memcpy(&original, lock.data() + in_page_offset, sizeof(original));
-//     journal_->push_action(FilesystemAttributeModification,
-//                           *reinterpret_cast<uint32_t *>(&original),
-//                           *reinterpret_cast<const uint32_t *>(&attr),
-//                           index);
-//     std::memcpy(lock.data() + in_page_offset, &attr, sizeof(attr));
-//     journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
-// }
-
 cfs::journal_auto_write_t::journal_auto_write_t(cfs_journaling_t *journal, bool &success,
     const uint64_t start_action,
     const uint64_t start_action_param0,
@@ -549,7 +520,7 @@ cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linear
             .block_type = blk_type,
             .block_type_cow = 0,
             .allocation_oom_scan_per_refresh_count = 0,
-            .newly_allocated_thus_no_cow = 1,
+            .newly_allocated_thus_no_cow = 0,
             .index_node_referencing_number = 1,
             .block_checksum = 0, // just 0, newly_allocated_thus_no_cow indicated this block hasn't been modified
         });

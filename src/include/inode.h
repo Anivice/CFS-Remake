@@ -13,6 +13,7 @@ namespace cfs
         inode_t * parent_inode_;
         std::unique_ptr < cfs_inode_service_t > referenced_inode_;
         uint64_t current_referenced_inode_;
+        std::vector<uint8_t> data_;
 
     public:
         /// CoW on dentry level
@@ -35,11 +36,13 @@ namespace cfs
                     referenced_inode_->inode_effective_lock_.size());
                 /// no static data, yet
 
-                std::vector<uint8_t> data(bitmap_dump.size() + attribute_dump.size() + inode_metadata.size());
+                data_.resize(bitmap_dump.size() + attribute_dump.size() + inode_metadata.size()); // we keep this buffer
+                /// so that less malloc is called
+                /// data will be overwritten anyway so
 
-                uint64_t offset;
+                uint64_t offset = 0;
                 auto write_to_buffer = [&](const std::vector<uint8_t> & buffer) {
-                    std::memcpy(data.data() + offset, buffer.data(), buffer.size());
+                    std::memcpy(data_.data() + offset, buffer.data(), buffer.size());
                     offset += buffer.size();
                 };
 
@@ -47,7 +50,7 @@ namespace cfs
                 write_to_buffer(attribute_dump);
                 write_to_buffer(inode_metadata);
 
-                const auto data_compressed = utils::arithmetic::compress(data);
+                const auto data_compressed = utils::arithmetic::compress(data_);
                 int size = *(int*)(data_compressed.data() + data_compressed.size() - sizeof(int)); // size is at the end of the stream
                 // we need to move it to the front
                 referenced_inode_->write((char*)&size, sizeof(size), 0);
@@ -58,6 +61,9 @@ namespace cfs
             /// TODO: check if CoW is required
             /// TODO: Allocate a new inode, copy old data over, set corresponding flags on both new and old inodes
             /// TODO: rewrite all the dentry information, including relink
+            /// Changes will be reflected from child to parent one by one until it reaches root
+            /// where it effectively saves fs info before any changes occur, thus snapshot can have their
+            /// own overview of the while file system. The tradeoff is the overhead it adds when dealing with writes
 
             return cow_index;
         }
@@ -84,7 +90,7 @@ namespace cfs
 
         void resize(const uint64_t size)
         {
-            if (parent_inode_) parent_inode_->inode_copy_on_write();
+            if (parent_inode_) parent_inode_->inode_copy_on_write(current_referenced_inode_);
             referenced_inode_->resize(size);
         }
 
