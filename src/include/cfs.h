@@ -2,6 +2,7 @@
 #define CFS_CFS_H
 
 #include <cstdint>
+#include <vector>
 #include <sys/stat.h>
 
 namespace cfs
@@ -167,6 +168,10 @@ namespace cfs
             cfs_inode_attribute = (struct stat *)data;
             cfs_level_1_indexes = (uint64_t *)(data + sizeof(struct stat));
         }
+    };
+
+    struct dentry_static_metadata_section_t {
+
     };
 
 }

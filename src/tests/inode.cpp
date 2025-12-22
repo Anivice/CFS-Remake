@@ -1,3 +1,4 @@
+#include "inode.h"
 #include "smart_block_t.h"
 #include "cfsBasicComponents.h"
 #include <fcntl.h>
@@ -31,19 +32,22 @@ int main(int argc, char ** argv)
         cfs::cfs_block_attribute_access_t block_attribute(&fs, &journal);
         cfs::cfs_block_manager_t block_manager(&raid1_bitmap, &fs.cfs_header_block, &block_attribute, &journal);
         raid1_bitmap.set_bit(0, true); // mark 0 as allocated
-        cfs::cfs_inode_service_t inode_service(0, &fs, &block_manager, &journal, &block_attribute);
+        raid1_bitmap.set_bit(1, true);
+        block_attribute.set<cfs::block_type>(1, cfs::INDEX_NODE_BLOCK);
+        cfs::inode_t inode(0, &fs, &block_manager, &journal, &block_attribute, nullptr);
+        cfs::inode_t inode1(1, &fs, &block_manager, &journal, &block_attribute, &inode);
 
         auto write = [&](const std::string & input, const std::string & output)
         {
             const int fd = open(output.c_str(), O_RDWR | O_CREAT | O_TRUNC, 0644);
             cfs_assert_simple(fd > 0);
             const cfs::basic_io::mmap file(input); //test data
-            inode_service.resize(file.size());
-            inode_service.write(file.data(), file.size(), 0);
+            inode1.resize(file.size());
+            inode1.write(file.data(), file.size(), 0);
 
             std::vector<char> data;
             data.resize(file.size());
-            inode_service.read(data.data(), file.size(), 0);
+            inode1.read(data.data(), file.size(), 0);
             ::write(fd, data.data(), data.size());
             close(fd);
         };
@@ -59,6 +63,8 @@ int main(int argc, char ** argv)
             write(argv[3], out2);
             dlog("Iteration i=", i, " finished\n");
         }
+
+        inode.inode_copy_on_write();
     }
     catch (cfs::error::generalCFSbaseError & e) {
         elog(e.what(), "\n");

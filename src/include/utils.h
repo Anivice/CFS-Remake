@@ -4,6 +4,8 @@
 #include <string>
 #include <cstdlib>
 #include <cstdint>
+#include <vector>
+#include "lz4.h"
 #include "cppcrc.h"
 
 /// Utilities
@@ -60,6 +62,9 @@ namespace cfs::utils
         [[nodiscard]] uint64_t hash64(const Type & data) noexcept {
             return hash64((uint8_t*)&data, sizeof(data));
         }
+
+        std::vector < uint8_t > compress(const std::vector < uint8_t > & data) noexcept;
+        std::vector < uint8_t > decompress(const std::vector < uint8_t > & data) noexcept;
     }
 
     /// Return current UNIX timestamp

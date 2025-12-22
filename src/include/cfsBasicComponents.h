@@ -117,6 +117,9 @@ namespace cfs
     public:
         explicit cfs_bitmap_singular_t(char * mapped_area, uint64_t data_block_numbers);
 
+        [[nodiscard]] void * data() const { return this->data_array_; }
+        [[nodiscard]] uint64_t size() const { return this->bytes_required_; }
+
         /// get CRC64 of the whole bitmap
         // [[nodiscard]] uint64_t dump_checksum64();
     };
@@ -127,32 +130,7 @@ namespace cfs
         cfs_bitmap_singular_t mirror2;
         cfs::filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
-
-        // /// Small cache pool
-        // /// @tparam static_cache_size Static cache size
-        // template < uint64_t static_cache_size >
-        // class static_cache_t
-        // {
-        //     tsl::hopscotch_map < uint64_t, bool > bitmap_static_level_cache_;
-        //     tsl::hopscotch_map < uint64_t, uint64_t > bitmap_static_level_access_counter_;
-        //     std::mutex static_level_cache_mtx_;
-        //
-        // public:
-        //     /// initialize small cache pool
-        //     static_cache_t();
-        //
-        //     /// set small cache pool
-        //     /// @param index index
-        //     /// @param val Value
-        //     void set_fast_cache(uint64_t index, bool val);
-        //
-        //     /// get small cache pool
-        //     /// @param index Index
-        //     /// @return -1 if not found, or 0/1 to indicate values
-        //     int get_fast_cache(uint64_t index);
-        // };
-
-        // static_cache_t<1024 * 1024 * 64> small_cache_;
+        std::mutex dump_mutex_;
 
     public:
         explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor, cfs_journaling_t * journal);
@@ -169,6 +147,15 @@ namespace cfs
         /// @return NONE
         /// @throws cfs::error::assertion_failed Out of bounds
         void set_bit(uint64_t index, bool new_bit);
+
+        std::vector<uint8_t> dump()
+        {
+            std::lock_guard lock(dump_mutex_);
+            std::vector<uint8_t> ret;
+            ret.resize(mirror1.size());
+            std::memcpy(ret.data(), mirror1.data(), mirror1.size());
+            return ret;
+        }
     };
 
     // template<uint64_t static_cache_size>
@@ -237,10 +224,26 @@ namespace cfs
         filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
         cfs::filesystem::block_shared_lock_t location_lock_;
-        std::atomic_bool dirty_ = false;
+        // std::atomic_bool dirty_ = false;
 
     public:
-        bool dirty() { return dirty_; }
+        // bool dirty() { return dirty_; }
+
+        std::vector<uint8_t> dump()
+        {
+            const uint64_t map_len = parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start;
+            std::vector<uint32_t> ret(map_len, 0);
+            for (uint64_t i = 0; i < map_len; i++)
+            {
+                uint32_t it = 0;
+                *(cfs_block_attribute_t *)(&it) = get(i);
+                ret.push_back(it);
+            }
+
+            std::vector<uint8_t> dump(map_len * sizeof(uint32_t), 0);
+            std::memcpy(dump.data(), ret.data(), dump.size());
+            return dump;
+        }
 
         explicit cfs_block_attribute_access_t(filesystem * parent_fs_governor, cfs_journaling_t * journal);
 
@@ -354,9 +357,9 @@ namespace cfs
         else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
             return lock(index)->allocation_oom_scan_per_refresh_count;
         }
-        else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            return lock(index)->newly_allocated_thus_no_cow;
-        }
+        // else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
+            // return lock(index)->newly_allocated_thus_no_cow;
+        // }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
             return lock(index)->index_node_referencing_number;
         }
@@ -380,9 +383,9 @@ namespace cfs
     void cfs_block_attribute_access_t::set(const uint64_t index, const uint32_t value)
     {
         auto lock_ = lock(index);
-        if (!lock_->newly_allocated_thus_no_cow) {
-            dirty_ = true;
-        }
+        // if (!lock_->newly_allocated_thus_no_cow) {
+            // dirty_ = true;
+        // }
 
         if constexpr (std::is_same_v<Type, block_status>) {
             lock_->block_status = value;
@@ -429,9 +432,9 @@ namespace cfs
     void cfs_block_attribute_access_t::move(const uint64_t index)
     {
         auto lock_ = lock(index);
-        if (!lock_->newly_allocated_thus_no_cow) {
-            dirty_ = true;
-        }
+        // if (!lock_->newly_allocated_thus_no_cow) {
+            // dirty_ = true;
+        // }
         uint32_t val{};
         if constexpr (std::is_same_v<Type1, block_status>) {
             val = lock_->block_status;
@@ -495,9 +498,9 @@ namespace cfs
     void cfs_block_attribute_access_t::inc(const uint64_t index, const uint32_t value)
     {
         auto lock_ = lock(index);
-        if (!lock_->newly_allocated_thus_no_cow) {
-            dirty_ = true;
-        }
+        // if (!lock_->newly_allocated_thus_no_cow) {
+            // dirty_ = true;
+        // }
         if constexpr (std::is_same_v<Type, block_status>) {
             lock_->block_status += value;
         }
@@ -535,9 +538,9 @@ namespace cfs
     void cfs_block_attribute_access_t::dec(const uint64_t index, const uint32_t value)
     {
         auto lock_ = lock(index);
-        if (!lock_->newly_allocated_thus_no_cow) {
-            dirty_ = true;
-        }
+        // if (!lock_->newly_allocated_thus_no_cow) {
+            // dirty_ = true;
+        // }
         if constexpr (std::is_same_v<Type, block_status>) {
             lock_->block_status -= value;
         }
@@ -640,6 +643,8 @@ namespace cfs
         /// deallocate a block
         /// @param index Block index
         void deallocate(uint64_t index);
+
+        std::vector<uint8_t> dump_bitmap_data() { return bitmap_->dump(); }
     };
 
     template < typename F> concept Allocator_ = requires(F f, const uint8_t c) { { std::invoke(f, c) } -> std::same_as<uint64_t>; };
@@ -647,9 +652,12 @@ namespace cfs
         { std::invoke(f, index) } -> std::same_as<void>;
     };
 
+    class inode_t;
     class cfs_inode_service_t : protected cfs_inode_t
     {
         std::vector < uint8_t > before_;
+
+    protected:
         filesystem::guard inode_effective_lock_;
         filesystem * parent_fs_governor_;
         cfs_block_manager_t * block_manager_;
@@ -800,6 +808,9 @@ namespace cfs
         /// @return size written
         uint64_t write(const char * data, uint64_t size, uint64_t offset);
 
+        // !!! The following are metadata editing functions that should be called from inode_t
+        // to create copy-on-write redundancies, which, inode service routine is incapable of doing !!!
+
         /// resize this inode
         /// @param new_size New size
         void resize(uint64_t new_size);
@@ -814,6 +825,8 @@ namespace cfs
 
         /// get struct stat
         [[nodiscard]] struct stat get_stat () const { return *cfs_inode_attribute; }
+
+        friend class inode_t;
     };
 
     template<Allocator_ FuncAlloc, Deallocator_ FuncDealloc>

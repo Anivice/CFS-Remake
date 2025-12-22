@@ -126,3 +126,29 @@ uint8_t cfs::utils::arithmetic::hash5(const uint8_t *data, const size_t length) 
     const uint8_t result = bit_0_1 | bit_3 | bit_5 | bit_7;
     return result;
 }
+
+std::vector<uint8_t> cfs::utils::arithmetic::compress(const std::vector<uint8_t> &data) noexcept
+{
+    if (data.size() > LZ4_MAX_INPUT_SIZE) return { };
+
+    std::vector < uint8_t > ret;
+    const int maxDst = LZ4_compressBound(data.size());   // worst-case bound
+    ret.resize(maxDst);
+
+    const int cSize = LZ4_compress_default((char*)data.data(), (char*)ret.data(), data.size(), maxDst);  // returns 0 on failure
+    if (cSize == 0) { return { }; }
+    ret.resize(cSize + sizeof(int));
+    *(int*)(ret.data() + cSize) = cSize;
+    return ret;
+}
+
+std::vector<uint8_t> cfs::utils::arithmetic::decompress(const std::vector<uint8_t> &data) noexcept
+{
+    std::vector < uint8_t > result;
+    const int * cSize = (int*)(data.data() + data.size() - sizeof(int));
+    result.resize(*cSize);
+    const int dSize = LZ4_decompress_safe((char*)data.data(), (char*)result.data(),
+                                          data.size() - sizeof(int), *cSize);
+    if (dSize < 0) return { };   // malformed input or dst too small
+    return result;
+}

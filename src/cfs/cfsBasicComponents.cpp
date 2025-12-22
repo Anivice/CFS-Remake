@@ -126,10 +126,6 @@ cfs::cfs_bitmap_block_mirroring_t::cfs_bitmap_block_mirroring_t(cfs::filesystem 
 bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 {
     cfs_assert_simple(index < (parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start))
-    // if (const auto result = small_cache_.get_fast_cache(index); result != -1) {
-        // return result & 0x01;
-    // }
-
     // huge multipage state lock (really slow, so it'd better be in cache pool)
     const auto page_bare = index / (parent_fs_governor_->static_info_.block_size * 8);
     const auto bitmap_01 = parent_fs_governor_->static_info_.data_bitmap_start + page_bare;
@@ -156,14 +152,11 @@ bool cfs::cfs_bitmap_block_mirroring_t::get_bit(const uint64_t index)
 void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool new_bit)
 {
     cfs_assert_simple(index < (parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start))
-    // if (const auto result = small_cache_.get_fast_cache(index); result != -1) {
-        // if (new_bit == (result & 0x01)) return;
-    // }
 
+    std::lock_guard lock(dump_mutex_);
     bool success = false;
     const auto original = this->get_bit(index);
     g_transaction(journal_, success, FilesystemBitmapModification, original, new_bit, index);
-    // journal_->push_action(FilesystemBitmapModification, original, new_bit, index);
     const auto page_bare = index / (parent_fs_governor_->static_info_.block_size * 8);
     const auto bitmap_01 = parent_fs_governor_->static_info_.data_bitmap_start + page_bare;
     const auto bitmap_02 = parent_fs_governor_->static_info_.data_bitmap_backup_start + page_bare;
@@ -171,13 +164,6 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
     auto lock2 = parent_fs_governor_->lock(bitmap_02);
     mirror1.set_bit(index, new_bit, false);
     mirror2.set_bit(index, new_bit, false);
-
-    // small_cache_.set_fast_cache(index, new_bit);
-
-    auto & header_runtime = parent_fs_governor_->cfs_header_block;
-    // header_runtime.set_info<allocation_bitmap_checksum_cow>(header_runtime.get_info<allocation_bitmap_checksum>());
-    // header_runtime.set_info<allocation_bitmap_checksum>(mirror1.dump_checksum64());
-    // journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
     success = true;
 }
 
@@ -904,18 +890,4 @@ void cfs::cfs_inode_service_t::set_ctime(const timespec st_ctim)
 void cfs::cfs_inode_service_t::set_mtime(const timespec st_mtim)
 {
     this->cfs_inode_attribute->st_atim = st_mtim;
-}
-
-cfs::cfs_directory_t::cfs_directory_t(
-    const uint64_t index,
-    filesystem *parent_fs_governor,
-    cfs_block_manager_t *block_manager,
-    cfs_journaling_t *journal,
-    cfs_block_attribute_access_t *block_attribute)
-: cfs_inode_service_t(index, parent_fs_governor, block_manager, journal, block_attribute)
-{
-}
-
-cfs::cfs_inode_service_t cfs::cfs_directory_t::make_inode(const std::string &name)
-{
 }
