@@ -135,7 +135,7 @@ namespace cfs
 
     FilesystemActionType_Def(FilesystemBitmapModification, 0x2010); // [FROM] [TO] [LOCATION]
     FilesystemActionType_Def(AttemptedFixFinishedAndAssumedFine, 0x2020); // [Corruption Type]
-    FilesystemActionType_Def(FilesystemAttributeModification, 0x2030); // [FROM] [TO] [LOCATION]
+    FilesystemActionType_Def(FilesystemAttributeModification, 0x2030); // [ORIGINAL] [LOCATION]
 
     FilesystemActionType_Def(GlobalTransaction, 0x3000) // [Transaction Type], [PARAM...]
 

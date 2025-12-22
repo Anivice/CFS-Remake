@@ -113,22 +113,13 @@ uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_s
 
 uint64_t cfs::utils::arithmetic::hash64(const uint8_t *data, const size_t length) noexcept
 {
-    uint64_t hash = 0xFFFFFFFFFFFFFFFF;
-    for (size_t i = 0; i < length; i++) {
-        hash ^= data[i];
-    }
-
-    return hash ^ 0xFFFFFFFFFFFFFFFF;
-    // return CRC64::ECMA::calc(data, length);
+    return CRC64::ECMA::calc(data, length);
 }
 
 uint8_t cfs::utils::arithmetic::hash5(const uint8_t *data, const size_t length) noexcept
 {
-    uint8_t checksum = 0xFF;
-    for (size_t i = 0; i < length; i++) {
-        checksum ^= data[i];
-    }
-    const uint8_t bit_0_1 = checksum & 0x03;        // 0 -1
+    const uint8_t checksum = CRC8::CDMA2000::calc(data, length);
+    const uint8_t bit_0_1 = checksum & 0x03;        // 0 - 1
     const uint8_t bit_3 = (checksum & 0x08) >> 1;   // 2
     const uint8_t bit_5 = (checksum & 0x20) >> 2;   // 3
     const uint8_t bit_7 = (checksum & 0x80) >> 3;   // 4

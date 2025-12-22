@@ -188,6 +188,32 @@ cfs::cfs_block_attribute_access_t::cfs_block_attribute_access_t(filesystem *pare
     location_lock_.init();
 }
 
+cfs::cfs_block_attribute_access_t::smart_lock_t::smart_lock_t(
+    cfs_block_attribute_access_t *parent,
+    const uint64_t index)
+:
+    parent_(parent), index_(index)
+{
+    parent->location_lock_.lock(index);
+    const auto offset = index * sizeof(cfs_block_attribute_t);
+    const auto in_page_offset = offset % parent->parent_fs_governor_->static_info_.block_size;
+    const auto page = offset / parent->parent_fs_governor_->static_info_.block_size +
+                      parent->parent_fs_governor_->static_info_.data_block_attribute_table_start;
+    cfs_assert_simple(parent->parent_fs_governor_->static_info_.data_block_attribute_table_start <= page
+        && page < parent->parent_fs_governor_->static_info_.data_block_attribute_table_end);
+    const auto pg_data = parent->parent_fs_governor_->lock(page);
+    data_ = (cfs_block_attribute_t*)(void*)(pg_data.data() + in_page_offset);
+    before_ = *data_;
+}
+
+cfs::cfs_block_attribute_access_t::smart_lock_t::~smart_lock_t()
+{
+    parent_->journal_->push_action(FilesystemAttributeModification,
+        *(uint32_t*)&before_, *(uint32_t*)data_, index_);
+    parent_->journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
+    parent_->location_lock_.unlock(index_);
+}
+
 // cfs::cfs_block_attribute_t cfs::cfs_block_attribute_access_t::get(const uint64_t index)
 // {
 //     const auto offset = index * sizeof(cfs_block_attribute_t);

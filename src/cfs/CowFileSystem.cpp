@@ -55,7 +55,7 @@ std::string print_attribute(const uint32_t val)
     ss << "     Age:                " << std::dec << attr.allocation_oom_scan_per_refresh_count << " cycles\n";
     ss << "     New alloc no CoW:   " << (attr.newly_allocated_thus_no_cow ? "True" : "False") << "\n";
     ss << "     Index referenced:   " << std::dec << attr.index_node_referencing_number << "\n";
-    ss << "     HASH5:              " << std::hex << std::setw(3) << std::setfill('0') << attr.block_checksum << "\n";
+    ss << "     HASH5:              " << std::hex << std::setw(2) << std::setfill('0') << attr.block_checksum << "\n";
     return ss.str();
 }
 
@@ -117,6 +117,8 @@ static std::string translate_action_into_literal(const cfs::cfs_action_t & actio
         break;
         print_default(action.action_data.action_plain.action);
     }
+
+    return ss.str();
 }
 
 namespace cfs
@@ -150,7 +152,8 @@ namespace cfs
             std::cout.write(reinterpret_cast<const char *>(version_text), version_text_len);
             std::cout << std::endl;
         }
-        else if (vec.front() == "debug" && vec.size() >= 2) {
+        else if (vec.front() == "debug" && vec.size() >= 2)
+        {
             if (vec[1] == "cat" && vec.size() == 3)
             {
                 if (vec[2] == "bitmap")
@@ -199,6 +202,22 @@ namespace cfs
                     std::ranges::for_each(journal, [](const cfs_action_t & action) {
                         std::cout << translate_action_into_literal(action) << std::endl;
                     });
+                }
+            }
+            if (vec[1] == "check" && vec.size() == 3)
+            {
+                if (vec[2] == "block_hash5")
+                {
+                    const auto len = this->cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
+                    for (uint64_t i = 0; i < len; i++)
+                    {
+                        auto pg = cfs_basic_filesystem_.lock(i + cfs_basic_filesystem_.static_info_.data_table_start);
+                        const uint8_t checksum = cfs::utils::arithmetic::hash5((uint8_t*)pg.data(), pg.size());
+                        const auto comp = block_attribute_.get<block_checksum>(i);
+                        if (!block_attribute_.get<newly_allocated_thus_no_cow>(i) && comp != checksum) {
+                            elog(std::dec, "Checksum mismatch at block index ", i, ", attribute says it's ", (uint8_t)comp, ", but we have ", checksum, "\n");
+                        }
+                    }
                 }
             }
         }

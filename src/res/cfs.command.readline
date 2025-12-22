@@ -47,6 +47,7 @@
                                                         # *.readline is a prompt and help declaration file which
                                                         # DOES ABSOLUTELY NOT DICTATES HOW A COMMAND SYNTAX WORKS
                                     < journal   (Show journal):     [NONE] >,
-                >
+                >,
+                < check (Check correctness): < block_hash5: [NONE] > >,
     >
 }
