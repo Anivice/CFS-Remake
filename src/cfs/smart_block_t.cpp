@@ -271,7 +271,7 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     head.static_info.journal_end   = head.static_info.blocks - 1;
 
     // ────── checksum & timestamps ──────
-    head.static_info_checksum = head.static_info_checksum_dup = utils::arithmetic::hashcrc64(head.static_info);
+    head.static_info_checksum = head.static_info_checksum_dup = utils::arithmetic::hash64(head.static_info);
     head.static_info_dup = head.static_info;
 
     const auto now = utils::get_timestamp();
@@ -448,8 +448,8 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
     header_temp_tail->runtime_info_cow = header_temp_tail->runtime_info;
     header_temp_tail->runtime_info = header_temp->runtime_info;
 
-    const auto static_info_crc64 = utils::arithmetic::hashcrc64(header_temp->static_info);
-    const auto static_info_dup_checksum = utils::arithmetic::hashcrc64(header_temp->static_info_dup);
+    const auto static_info_crc64 = utils::arithmetic::hash64(header_temp->static_info);
+    const auto static_info_dup_checksum = utils::arithmetic::hash64(header_temp->static_info_dup);
     std::map < uint64_t, decltype(header_temp->static_info) > static_info_map;
     std::vector < std::pair < uint64_t, decltype(header_temp->static_info) > > static_info_vector;
     bool patch_zeros = false;

@@ -41,8 +41,6 @@ namespace cfs
             uint64_t last_check_timestamp;  // last time check ran
             uint64_t snapshot_number;
             uint64_t snapshot_number_cow;
-            uint64_t allocation_bitmap_checksum;
-            uint64_t allocation_bitmap_checksum_cow;
             struct {
                 uint64_t clean:1;
                 uint64_t _reserved:63;
@@ -57,6 +55,10 @@ namespace cfs
 
         struct {
             uint64_t _1;
+            uint64_t _2;
+            uint64_t _3;
+            uint64_t _4;
+            uint64_t _5;
         } _reserved_;
     };
     static_assert(sizeof(cfs_head_t) == cfs_header_size, "Faulty header size");
@@ -86,7 +88,7 @@ namespace cfs
         uint32_t allocation_oom_scan_per_refresh_count:4;
         uint32_t newly_allocated_thus_no_cow:1;
         uint32_t index_node_referencing_number:16; // Max 0xFFFF (65535) depth of snapshots
-        uint32_t _reserved_:5;
+        uint32_t block_checksum:5;
     };
     static_assert(sizeof(cfs_block_attribute_t) == cfs_block_attribute_size, "Faulty attribute size");
 
@@ -165,7 +167,5 @@ namespace cfs
     };
 
 }
-
-#define debug_code(X) if(CFS_DEBUG) { X; }
 
 #endif //CFS_CFS_H

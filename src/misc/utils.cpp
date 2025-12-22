@@ -95,51 +95,43 @@ uint64_t cfs::utils::get_timestamp() noexcept
 uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_size, const uint64_t particles)
 {
     assert_throw(cell_size != 0, "DIV/0");
-// #ifdef __x86_64__
-//     // 50% performance boost bc we used div only once
-//     uint64_t q, r;
-//     asm ("divq %[d]"
-//          : "=a"(q), "=d"(r)
-//          : "0"(particles), "1"(0), [d]"r"(cell_size)
-//          : "cc");
-//
-//     if (r != 0) return q + 1;
-//     else return q;
-// #else
+#ifdef __x86_64__
+    // 50% performance boost bc we used div only once
+    uint64_t q, r;
+    asm ("divq %[d]"
+         : "=a"(q), "=d"(r)
+         : "0"(particles), "1"(0), [d]"r"(cell_size)
+         : "cc");
+
+    if (r != 0) return q + 1;
+    else return q;
+#else
     const uint64_t cells = particles / cell_size + (particles % cell_size == 0 ? 0 : 1);
     return cells;
-// #endif
+#endif
 }
 
-cfs::utils::arithmetic::CRC64::CRC64() noexcept
+uint64_t cfs::utils::arithmetic::hash64(const uint8_t *data, const size_t length) noexcept
 {
-    init_crc64();
-}
-
-void cfs::utils::arithmetic::CRC64::update(const uint8_t* data, const size_t length) noexcept
-{
-    for (size_t i = 0; i < length; ++i) {
-        crc64_value = table[(crc64_value ^ data[i]) & 0xFF] ^ (crc64_value >> 8);
+    uint64_t hash = 0xFFFFFFFFFFFFFFFF;
+    for (size_t i = 0; i < length; i++) {
+        hash ^= data[i];
     }
+
+    return hash ^ 0xFFFFFFFFFFFFFFFF;
+    // return CRC64::ECMA::calc(data, length);
 }
 
-[[nodiscard]] uint64_t cfs::utils::arithmetic::CRC64::get_checksum() const noexcept
+uint8_t cfs::utils::arithmetic::hash5(const uint8_t *data, const size_t length) noexcept
 {
-    // add the final complement that ECMA‑182 requires
-    return (crc64_value ^ 0xFFFFFFFFFFFFFFFFULL);
-}
-
-void cfs::utils::arithmetic::CRC64::init_crc64() noexcept
-{
-    crc64_value = 0xFFFFFFFFFFFFFFFF;
-    for (uint64_t i = 0; i < 256; ++i) {
-        uint64_t crc = i;
-        for (uint64_t j = 8; j--; ) {
-            if (crc & 1)
-                crc = (crc >> 1) ^ 0xC96C5795D7870F42;  // Standard CRC-64 polynomial
-            else
-                crc >>= 1;
-        }
-        table[i] = crc;
+    uint8_t checksum = 0xFF;
+    for (size_t i = 0; i < length; i++) {
+        checksum ^= data[i];
     }
+    const uint8_t bit_0_1 = checksum & 0x03;        // 0 -1
+    const uint8_t bit_3 = (checksum & 0x08) >> 1;   // 2
+    const uint8_t bit_5 = (checksum & 0x20) >> 2;   // 3
+    const uint8_t bit_7 = (checksum & 0x80) >> 3;   // 4
+    const uint8_t result = bit_0_1 | bit_3 | bit_5 | bit_7;
+    return result;
 }

@@ -4,6 +4,7 @@
 #include <string>
 #include <cstdlib>
 #include <cstdint>
+#include "cppcrc.h"
 
 /// Utilities
 namespace cfs::utils
@@ -36,35 +37,17 @@ namespace cfs::utils
         /// @throws cfs::error::assertion_failed DIV/0
         uint64_t count_cell_with_cell_size(uint64_t cell_size, uint64_t particles);
 
-        class CRC64 {
-        public:
-            CRC64() noexcept;
-
-            /// Update CRC64 using new data
-            /// @param data New data
-            /// @param length New data length
-            void update(const uint8_t* data, size_t length) noexcept;
-
-            /// Get checksum
-            [[nodiscard]] uint64_t get_checksum() const noexcept;
-
-        private:
-            uint64_t crc64_value{};
-            uint64_t table[256] {};
-            void init_crc64() noexcept;
-        };
+        /// Hash a set of data
+        /// @param data Address of the data array
+        /// @param length Data length
+        /// @return 64 bit checksum of the provided data
+        [[nodiscard]] uint64_t hash64(const uint8_t * data, size_t length) noexcept;
 
         /// Hash a set of data
         /// @param data Address of the data array
         /// @param length Data length
-        /// @return CRC64 checksum of the provided data
-        [[nodiscard]] inline
-        uint64_t hashcrc64(const uint8_t * data, const size_t length) noexcept
-        {
-            CRC64 hash;
-            hash.update(data, length);
-            return hash.get_checksum();
-        }
+        /// @return 5 bit checksum of the provided data
+        [[nodiscard]] uint8_t hash5(const uint8_t * data, size_t length) noexcept;
 
         template < typename Type >
         concept PODType = std::is_standard_layout_v<Type> && std::is_trivial_v<Type>;
@@ -74,8 +57,8 @@ namespace cfs::utils
         /// @param data Struct data
         /// @return CRC64 checksum of the provided data
         template < PODType Type >
-        [[nodiscard]] uint64_t hashcrc64(const Type & data) noexcept {
-            return hashcrc64((uint8_t*)&data, sizeof(data));
+        [[nodiscard]] uint64_t hash64(const Type & data) noexcept {
+            return hash64((uint8_t*)&data, sizeof(data));
         }
     }
 

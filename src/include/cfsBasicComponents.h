@@ -119,7 +119,7 @@ namespace cfs
         explicit cfs_bitmap_singular_t(char * mapped_area, uint64_t data_block_numbers);
 
         /// get CRC64 of the whole bitmap
-        [[nodiscard]] uint64_t dump_crc64() const;
+        // [[nodiscard]] uint64_t dump_checksum64();
     };
 
     class cfs_bitmap_block_mirroring_t
@@ -129,31 +129,31 @@ namespace cfs
         cfs::filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
 
-        /// Small cache pool
-        /// @tparam static_cache_size Static cache size
-        template < uint64_t static_cache_size >
-        class static_cache_t
-        {
-            tsl::hopscotch_map < uint64_t, bool > bitmap_static_level_cache_;
-            tsl::hopscotch_map < uint64_t, uint64_t > bitmap_static_level_access_counter_;
-            std::mutex static_level_cache_mtx_;
+        // /// Small cache pool
+        // /// @tparam static_cache_size Static cache size
+        // template < uint64_t static_cache_size >
+        // class static_cache_t
+        // {
+        //     tsl::hopscotch_map < uint64_t, bool > bitmap_static_level_cache_;
+        //     tsl::hopscotch_map < uint64_t, uint64_t > bitmap_static_level_access_counter_;
+        //     std::mutex static_level_cache_mtx_;
+        //
+        // public:
+        //     /// initialize small cache pool
+        //     static_cache_t();
+        //
+        //     /// set small cache pool
+        //     /// @param index index
+        //     /// @param val Value
+        //     void set_fast_cache(uint64_t index, bool val);
+        //
+        //     /// get small cache pool
+        //     /// @param index Index
+        //     /// @return -1 if not found, or 0/1 to indicate values
+        //     int get_fast_cache(uint64_t index);
+        // };
 
-        public:
-            /// initialize small cache pool
-            static_cache_t();
-
-            /// set small cache pool
-            /// @param index index
-            /// @param val Value
-            void set_fast_cache(uint64_t index, bool val);
-
-            /// get small cache pool
-            /// @param index Index
-            /// @return -1 if not found, or 0/1 to indicate values
-            int get_fast_cache(uint64_t index);
-        };
-
-        static_cache_t<1024 * 1024 * 64> small_cache_;
+        // static_cache_t<1024 * 1024 * 64> small_cache_;
 
     public:
         explicit cfs_bitmap_block_mirroring_t(cfs::filesystem * parent_fs_governor, cfs_journaling_t * journal);
@@ -172,59 +172,59 @@ namespace cfs
         void set_bit(uint64_t index, bool new_bit);
     };
 
-    template<uint64_t static_cache_size>
-    cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::static_cache_t() {
-        bitmap_static_level_cache_.reserve(static_cache_size);
-    }
-
-    template<uint64_t static_cache_size>
-    void cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::set_fast_cache(
-        const uint64_t index,
-        const bool val)
-    {
-        std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
-        if (bitmap_static_level_cache_.size() > static_cache_size)
-        {
-            std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
-            for (auto ptr = bitmap_static_level_cache_.begin(); ptr != bitmap_static_level_cache_.end();++ptr)
-            {
-                if (auto acc = bitmap_static_level_access_counter_.find(ptr->first);
-                    acc == bitmap_static_level_access_counter_.end())
-                {
-                    bitmap_static_level_cache_.erase(ptr);
-                }
-            }
-
-            for (const auto & [pos, rate] : bitmap_static_level_access_counter_) {
-                access_cache_.emplace_back(pos, rate);
-            }
-
-            std::ranges::sort(access_cache_,
-                              [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
-                                  return a.second < b.second;
-                              });
-            access_cache_.resize(access_cache_.size() / 2);
-            std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
-                bitmap_static_level_cache_.erase(pos.first);
-            });
-            bitmap_static_level_access_counter_.clear();
-        }
-
-        bitmap_static_level_cache_[index] = val;
-    }
-
-    template<uint64_t static_cache_size>
-    int cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::get_fast_cache(const uint64_t index)
-    {
-        std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
-        const auto ptr = bitmap_static_level_cache_.find(index);
-        if (ptr == bitmap_static_level_cache_.end()) {
-            return -1;
-        }
-
-        bitmap_static_level_access_counter_[index]++;
-        return ptr->second;
-    }
+    // template<uint64_t static_cache_size>
+    // cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::static_cache_t() {
+    //     bitmap_static_level_cache_.reserve(static_cache_size);
+    // }
+    //
+    // template<uint64_t static_cache_size>
+    // void cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::set_fast_cache(
+    //     const uint64_t index,
+    //     const bool val)
+    // {
+    //     std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
+    //     if (bitmap_static_level_cache_.size() > static_cache_size)
+    //     {
+    //         std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
+    //         for (auto ptr = bitmap_static_level_cache_.begin(); ptr != bitmap_static_level_cache_.end();++ptr)
+    //         {
+    //             if (auto acc = bitmap_static_level_access_counter_.find(ptr->first);
+    //                 acc == bitmap_static_level_access_counter_.end())
+    //             {
+    //                 bitmap_static_level_cache_.erase(ptr);
+    //             }
+    //         }
+    //
+    //         for (const auto & [pos, rate] : bitmap_static_level_access_counter_) {
+    //             access_cache_.emplace_back(pos, rate);
+    //         }
+    //
+    //         std::ranges::sort(access_cache_,
+    //                           [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
+    //                               return a.second < b.second;
+    //                           });
+    //         access_cache_.resize(access_cache_.size() / 2);
+    //         std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
+    //             bitmap_static_level_cache_.erase(pos.first);
+    //         });
+    //         bitmap_static_level_access_counter_.clear();
+    //     }
+    //
+    //     bitmap_static_level_cache_[index] = val;
+    // }
+    //
+    // template<uint64_t static_cache_size>
+    // int cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::get_fast_cache(const uint64_t index)
+    // {
+    //     std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
+    //     const auto ptr = bitmap_static_level_cache_.find(index);
+    //     if (ptr == bitmap_static_level_cache_.end()) {
+    //         return -1;
+    //     }
+    //
+    //     bitmap_static_level_access_counter_[index]++;
+    //     return ptr->second;
+    // }
 
     class cfs_block_attribute_access_t {
         filesystem * parent_fs_governor_;
@@ -342,6 +342,12 @@ namespace cfs
             std::vector < uint64_t > level3_pointers;
         };
 
+        struct allocation_map_t {
+            std::vector < std::pair < uint64_t, bool > > level1_pointers;
+            std::vector < std::pair < uint64_t, bool > > level2_pointers;
+            std::vector < std::pair < uint64_t, bool > > level3_pointers;
+        };
+
         struct linearized_block_descriptor_t {
             uint64_t level1_pointers;
             uint64_t level2_pointers;
@@ -398,6 +404,9 @@ namespace cfs
                 if (control_ && block_index_ != 0) { dealloc_(block_index_); }
             }
         };
+
+        allocation_map_t reallocate_linearized_block_by_descriptor(const linearized_block_descriptor_t & descriptor);
+        void commit_from_linearized_block(const allocation_map_t & descriptor);
 
         void commit_from_block_descriptor(const linearized_block_descriptor_t & descriptor);
 
