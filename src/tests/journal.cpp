@@ -44,7 +44,7 @@ int main(int argc, char ** argv)
                 .action_param3 = action_param3,
                 .action_param4 = action_param4,
             };
-            j_action.action_param_crc64 = cfs::utils::arithmetic::hashcrc64((uint8_t*)&j_action.action_data, sizeof(j_action.action_data));
+            j_action.action_param_crc64 = cfs::utils::arithmetic::hash64((uint8_t*)&j_action.action_data, sizeof(j_action.action_data));
             action_mirror.push_back(j_action);
             while (action_mirror.size() >= cell_size) action_mirror.erase(action_mirror.begin());
         };

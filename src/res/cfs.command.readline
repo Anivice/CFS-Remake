@@ -46,6 +46,7 @@
                                                         # show_attribute [INDEX] is the actual syntax here
                                                         # *.readline is a prompt and help declaration file which
                                                         # DOES ABSOLUTELY NOT DICTATES HOW A COMMAND SYNTAX WORKS
+                                    < journal   (Show journal):     [NONE] >,
                 >
     >
 }

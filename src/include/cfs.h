@@ -67,7 +67,7 @@ namespace cfs
     enum BlockStatusType : uint8_t {
         BLOCK_AVAILABLE_TO_MODIFY_0x00 = 0x00,
         BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01 = 0x01,
-        BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK = 0x02,
+        BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02 = 0x02,
         BlockStatusType_reserved_0x03 = 0x03,
     };
 
@@ -144,9 +144,9 @@ namespace cfs
     FilesystemActionType_Def(x##_Completed, val + 1); \
     FilesystemActionType_Def(x##_Failed, val + 2);
 
-    GlobalTransaction_Def(GlobalTransaction_AllocateBlock, 0x3001)
-    GlobalTransaction_Def(GlobalTransaction_DeallocateBlock, 0x3004)
-    GlobalTransaction_Def(GlobalTransaction_CreateRedundancy, 0x3007)
+    GlobalTransaction_Def(GlobalTransaction_AllocateBlock, 0x3001)      // where
+    GlobalTransaction_Def(GlobalTransaction_DeallocateBlock, 0x3004)    // where
+    GlobalTransaction_Def(GlobalTransaction_CreateRedundancy, 0x3007)   // where
 
     /// CFS inode memory mapper
     class cfs_inode_t {

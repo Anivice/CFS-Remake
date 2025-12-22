@@ -184,36 +184,38 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
 cfs::cfs_block_attribute_access_t::cfs_block_attribute_access_t(filesystem *parent_fs_governor,
     cfs_journaling_t *journal): parent_fs_governor_(parent_fs_governor), journal_(journal)
 {
+    *(uint64_t*)&location_lock_.blocks_ = parent_fs_governor->static_info_.data_table_end - parent_fs_governor->static_info_.data_table_start;
+    location_lock_.init();
 }
 
-cfs::cfs_block_attribute_t cfs::cfs_block_attribute_access_t::get(const uint64_t index)
-{
-    const auto offset = index * sizeof(cfs_block_attribute_t);
-    const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
-    const auto page = offset / parent_fs_governor_->static_info_.block_size +
-                      parent_fs_governor_->static_info_.data_block_attribute_table_start;
-    cfs_block_attribute_t ret {};
-    const auto lock = parent_fs_governor_->lock(page);
-    std::memcpy(&ret, lock.data() + in_page_offset, sizeof(ret));
-    return ret;
-}
+// cfs::cfs_block_attribute_t cfs::cfs_block_attribute_access_t::get(const uint64_t index)
+// {
+//     const auto offset = index * sizeof(cfs_block_attribute_t);
+//     const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
+//     const auto page = offset / parent_fs_governor_->static_info_.block_size +
+//                       parent_fs_governor_->static_info_.data_block_attribute_table_start;
+//     cfs_block_attribute_t ret {};
+//     const auto lock = parent_fs_governor_->lock(page);
+//     std::memcpy(&ret, lock.data() + in_page_offset, sizeof(ret));
+//     return ret;
+// }
 
-void cfs::cfs_block_attribute_access_t::set(const uint64_t index, const cfs_block_attribute_t attr)
-{
-    const auto offset = index * sizeof(cfs_block_attribute_t);
-    const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
-    const auto page = offset / parent_fs_governor_->static_info_.block_size +
-                      parent_fs_governor_->static_info_.data_block_attribute_table_start;
-    cfs_block_attribute_t original {};
-    const auto lock = parent_fs_governor_->lock(page);
-    std::memcpy(&original, lock.data() + in_page_offset, sizeof(original));
-    journal_->push_action(FilesystemAttributeModification,
-                          *reinterpret_cast<uint32_t *>(&original),
-                          *reinterpret_cast<const uint32_t *>(&attr),
-                          index);
-    std::memcpy(lock.data() + in_page_offset, &attr, sizeof(attr));
-    journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
-}
+// void cfs::cfs_block_attribute_access_t::set(const uint64_t index, const cfs_block_attribute_t attr)
+// {
+//     const auto offset = index * sizeof(cfs_block_attribute_t);
+//     const auto in_page_offset = offset % parent_fs_governor_->static_info_.block_size;
+//     const auto page = offset / parent_fs_governor_->static_info_.block_size +
+//                       parent_fs_governor_->static_info_.data_block_attribute_table_start;
+//     cfs_block_attribute_t original {};
+//     const auto lock = parent_fs_governor_->lock(page);
+//     std::memcpy(&original, lock.data() + in_page_offset, sizeof(original));
+//     journal_->push_action(FilesystemAttributeModification,
+//                           *reinterpret_cast<uint32_t *>(&original),
+//                           *reinterpret_cast<const uint32_t *>(&attr),
+//                           index);
+//     std::memcpy(lock.data() + in_page_offset, &attr, sizeof(attr));
+//     journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
+// }
 
 cfs::journal_auto_write_t::journal_auto_write_t(cfs_journaling_t *journal, bool &success,
     const uint64_t start_action,
@@ -303,7 +305,7 @@ uint64_t cfs::cfs_block_manager_t::allocate()
     auto allocate_at_this_index = [&](const uint64_t index)
     {
         bitmap_->set_bit(index, true);
-        block_attribute_->set(index, { .newly_allocated_thus_no_cow = 1 });
+        block_attribute_->clear(index, { .newly_allocated_thus_no_cow = 1 });
     };
 
     auto refresh_allocate = [&](bool & success, const uint64_t start, const uint64_t end)
@@ -336,9 +338,7 @@ uint64_t cfs::cfs_block_manager_t::allocate()
             for (uint64_t i = 0; i < map_size; ++i)
             {
                 if (bitmap_->get_bit(i)) {
-                    auto attr = block_attribute_->get(i);
-                    attr.allocation_oom_scan_per_refresh_count++;
-                    block_attribute_->set(i, attr);
+                    block_attribute_->inc<allocation_oom_scan_per_refresh_count>(i);
                 }
             }
 
@@ -347,12 +347,12 @@ uint64_t cfs::cfs_block_manager_t::allocate()
             std::map < uint64_t, uint64_t > scanned_cow_blocks;
             for (uint64_t i = 0; i < map_size; ++i)
             {
-                if (bitmap_->get_bit(i)) {
-                    const auto attr = block_attribute_->get(i);
-                    if (attr.block_type == CowRedundancy) {
-                        if (oldest < attr.allocation_oom_scan_per_refresh_count)
-                            oldest = attr.allocation_oom_scan_per_refresh_count;
-                        scanned_cow_blocks.emplace(i, attr.allocation_oom_scan_per_refresh_count);
+                if (bitmap_->get_bit(i))
+                {
+                    if (block_attribute_->get<block_type>(i) == CowRedundancy) {
+                        const auto refresh = block_attribute_->get<allocation_oom_scan_per_refresh_count>(i);
+                        if (oldest < refresh) oldest = refresh;
+                        scanned_cow_blocks[i] = refresh;
                     }
                 }
             }
@@ -405,8 +405,7 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
 
 uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index)
 {
-    auto attr = block_attribute_->get(index);
-    if (!attr.newly_allocated_thus_no_cow)
+    if (!block_attribute_->get<newly_allocated_thus_no_cow>(index))
     {
         bool success = true;
         g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index);
@@ -421,17 +420,16 @@ uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index)
         return new_block;
     }
 
-    attr.newly_allocated_thus_no_cow = 0;
+    block_attribute_->set<newly_allocated_thus_no_cow>(index, 0);
     if (index != block_index_) {
         const auto old_ = lock_page(index);
-        attr.block_checksum = utils::arithmetic::hash5(reinterpret_cast<const uint8_t *>(old_.data()), old_.size());
+        block_attribute_->set<block_checksum>(index, utils::arithmetic::hash5(reinterpret_cast<const uint8_t *>(old_.data()), old_.size()));
     } else {
-        attr.block_checksum = utils::arithmetic::hash5(
+        block_attribute_->set<block_checksum>(index, utils::arithmetic::hash5(
             reinterpret_cast<const uint8_t *>(inode_effective_lock_.data()),
-            inode_effective_lock_.size());
+            inode_effective_lock_.size()));
     }
 
-    block_attribute_->set(index, attr);
     return index;
 }
 
@@ -502,11 +500,13 @@ cfs::cfs_inode_service_t::size_to_linearized_block_descriptor(const uint64_t siz
 cfs::cfs_inode_service_t::allocation_map_t
 cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linearized_block_descriptor_t &descriptor)
 {
-    copy_on_write(block_index_); // cow on inode
-    auto alloc = [&](const uint8_t blk_type)->uint64_t {
+    // copy_on_write(block_index_); // cow on inode TODO: Do this in dentry, now inode
+    auto alloc = [&](const uint8_t blk_type)->uint64_t
+    {
         parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
         const auto blk = block_manager_->allocate();
-        const cfs_block_attribute_t attr = {
+        block_attribute_->clear(blk,
+         {
             .block_status = 0,
             .block_type = blk_type,
             .block_type_cow = 0,
@@ -514,14 +514,16 @@ cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linear
             .newly_allocated_thus_no_cow = 1,
             .index_node_referencing_number = 1,
             .block_checksum = 0, // just 0, newly_allocated_thus_no_cow indicated this block hasn't been modified
-        };
-        block_attribute_->set(blk, attr);
+        });
         return blk;
     };
-    auto dealloc = [&](const uint64_t index) {
+
+    auto dealloc = [&](const uint64_t index)
+    {
         parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
         return block_manager_->deallocate(index);
     };
+
     using smart_reallocate_func_t = smart_reallocate_t<decltype(alloc), decltype(dealloc)>;
 
     auto set_control = [](std::vector<std::unique_ptr<smart_reallocate_func_t>> & ctrl, const bool control)
@@ -587,18 +589,10 @@ cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linear
     return { .level1_pointers = level1_ret, .level2_pointers = level2_ret, .level3_pointers = level3_ret };
 }
 
-void cfs::cfs_inode_service_t::commit_from_linearized_block(const allocation_map_t & descriptor)
+void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t descriptor)
 {
-    // record level 1 -> inode
-    {
-        int offset = 0;
-        std::ranges::for_each(descriptor.level1_pointers, [&](const std::pair<uint64_t, bool> & relc) {
-            this->cfs_level_1_indexes[offset++] = relc.first;
-        });
-    }
-
-    auto record_from_lower_to_upper = [this](
-        const std::vector<std::pair<uint64_t, bool>> & upper,
+    auto record_from_lower_to_upper = [&](
+        std::vector<std::pair<uint64_t, bool>> & upper,
         const std::vector<std::pair<uint64_t, bool>> & lower)
     {
         std::vector<uint64_t> block_data; // upper level block data
@@ -608,10 +602,14 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(const allocation_map
 
         auto save = [&]
         {
-            const auto parent_blk = upper[block_offset++].first;
+            auto & parent_blk = upper[block_offset++].first;
             if (found_allocator)
             {
-                copy_on_write(parent_blk);
+                auto new_blk = copy_on_write(parent_blk);
+                if (parent_blk != new_blk) {
+                    parent_blk = new_blk;
+                    this->block_attribute_->move<block_type, block_type_cow>(parent_blk);
+                }
                 const auto lock = lock_page(parent_blk);
                 std::memcpy(lock.data(), block_data.data(), block_data.size() * sizeof(uint64_t));
             }
@@ -636,129 +634,21 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(const allocation_map
         }
     };
 
-    record_from_lower_to_upper(descriptor.level1_pointers, descriptor.level2_pointers);
     record_from_lower_to_upper(descriptor.level2_pointers, descriptor.level3_pointers);
+    record_from_lower_to_upper(descriptor.level1_pointers, descriptor.level2_pointers);
+
+    // record level 1 -> inode
+    {
+        int offset = 0;
+        std::ranges::for_each(descriptor.level1_pointers, [&](const std::pair<uint64_t, bool> & relc) {
+            this->cfs_level_1_indexes[offset++] = relc.first;
+        });
+    }
 }
 
 void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_block_descriptor_t &descriptor)
 {
     return commit_from_linearized_block(reallocate_linearized_block_by_descriptor(descriptor));
-    copy_on_write(block_index_); // cow on inode
-    auto alloc = [&](const uint8_t blk_type)->uint64_t {
-        parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
-        const auto blk = block_manager_->allocate();
-        const cfs_block_attribute_t attr = {
-            .block_status = 0,
-            .block_type = blk_type,
-            .block_type_cow = 0,
-            .allocation_oom_scan_per_refresh_count = 0,
-            .newly_allocated_thus_no_cow = 1,
-            .index_node_referencing_number = 1,
-            .block_checksum = 0, // just 0, newly_allocated_thus_no_cow indicated this block hasn't been modified
-        };
-        block_attribute_->set(blk, attr);
-        return blk;
-    };
-    auto dealloc = [&](const uint64_t index) {
-        parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
-        return block_manager_->deallocate(index);
-    };
-    using smart_reallocate_func_t = smart_reallocate_t<decltype(alloc), decltype(dealloc)>;
-
-    auto set_control = [](std::vector<std::unique_ptr<smart_reallocate_func_t>> & ctrl, const bool control)
-    {
-        std::ranges::for_each(ctrl, [&](const std::unique_ptr<smart_reallocate_func_t> & relc) {
-            relc->control_ = control;
-        });
-    };
-
-    auto register_into_list = [&](const std::vector < uint64_t > & list, const uint8_t type)->
-    std::vector<std::unique_ptr<smart_reallocate_func_t>>
-    {
-        std::vector<std::unique_ptr<smart_reallocate_func_t>> ret;
-        std::ranges::for_each(list, [&](const uint64_t blk) {
-            ret.emplace_back(std::make_unique<smart_reallocate_func_t>(alloc, dealloc, blk, true, type));
-        });
-
-        return ret;
-    };
-
-    auto allocate_automatically = [&](std::vector<std::unique_ptr<smart_reallocate_func_t>> & list, const uint8_t type)->void
-    {
-        std::ranges::for_each(list, [&](std::unique_ptr<smart_reallocate_func_t> & relc) {
-            if (relc == nullptr) {
-                relc = std::make_unique<smart_reallocate_func_t>(alloc, dealloc, type);
-            }
-        });
-    };
-
-    auto [level1_vec, level2_vec, level3_vec] = linearize_all_blocks();
-
-    std::vector<std::unique_ptr<smart_reallocate_func_t>> level1 = register_into_list(level1_vec, POINTER_BLOCK);
-    std::vector<std::unique_ptr<smart_reallocate_func_t>> level2 = register_into_list(level2_vec, POINTER_BLOCK);
-    std::vector<std::unique_ptr<smart_reallocate_func_t>> level3 = register_into_list(level3_vec, STORAGE_BLOCK);
-
-    level1.resize(descriptor.level1_pointers);
-    level2.resize(descriptor.level2_pointers);
-    level3.resize(descriptor.level3_pointers);
-
-    allocate_automatically(level1, POINTER_BLOCK);
-    allocate_automatically(level2, POINTER_BLOCK);
-    allocate_automatically(level3, STORAGE_BLOCK);
-
-    set_control(level1, false);
-    set_control(level2, false);
-    set_control(level3, false);
-
-    // record level 1 -> inode
-    {
-        int offset = 0;
-        std::ranges::for_each(level1, [&](const std::unique_ptr<smart_reallocate_func_t> & relc) {
-            this->cfs_level_1_indexes[offset++] = relc->block_index_;
-        });
-    }
-
-    auto record_from_lower_to_upper = [this](
-        const std::vector<std::unique_ptr<smart_reallocate_func_t>> & upper,
-        const std::vector<std::unique_ptr<smart_reallocate_func_t>> & lower)
-    {
-        std::vector<uint64_t> block_data; // upper level block data
-        block_data.reserve(block_size_ / sizeof(uint64_t));
-        uint64_t block_offset = 0; // upper level offset
-        bool found_allocator = false;
-
-        auto save = [&]
-        {
-            const auto parent_blk = upper[block_offset++]->block_index_;
-            if (found_allocator)
-            {
-                copy_on_write(parent_blk);
-                const auto lock = lock_page(parent_blk);
-                std::memcpy(lock.data(), block_data.data(), block_data.size() * sizeof(uint64_t));
-            }
-
-            block_data.clear();
-            found_allocator = false;
-        };
-
-        std::ranges::for_each(lower, [&](const std::unique_ptr<smart_reallocate_func_t> & relc)
-        {
-            block_data.push_back(relc->block_index_);
-            if (relc->allocated_by_smart_) found_allocator = true;
-
-            // block data full
-            if (block_data.size() == (block_size_ / sizeof(uint64_t))) {
-                save();
-            }
-        });
-
-        if (!block_data.empty()) {
-            save();
-        }
-    };
-
-    record_from_lower_to_upper(level1, level2);
-    record_from_lower_to_upper(level2, level3);
 }
 
 cfs::cfs_inode_service_t::cfs_inode_service_t(

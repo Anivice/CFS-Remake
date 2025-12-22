@@ -88,8 +88,10 @@ namespace cfs
     public:
         class guard_continuous;
         class block_shared_lock_t {
-        private:
+        public:
             const uint64_t blocks_ = 0;
+
+        private:
             class bitmap_t : public cfs::bitmap_base {
             private:
                 std::vector <uint8_t> data;
@@ -101,9 +103,12 @@ namespace cfs
                 void create(uint64_t size);
             } bitmap;
 
+        public:
             /// init bitmap
             /// @throws cfs::error::assertion_failed (thrown by bitmap::init())
             void init() { bitmap.create(blocks_); }
+
+        private:
             std::mutex bitmap_mtx_;
             std::condition_variable cv;
 
@@ -129,6 +134,8 @@ namespace cfs
         block_shared_lock_t bitlocker_;
 
     public:
+        void sync() { file_.sync(); }
+
         const cfs_head_t::static_info_t static_info_;
 
         class cfs_header_block_t {

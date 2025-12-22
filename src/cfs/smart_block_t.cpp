@@ -317,6 +317,7 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, size_bytes) == 0, "fallocate() failed");
     close(fd);
     ilog("Discarding finished\n");
+    std::vector<uint8_t> empty_blk;
     {
         basic_io::mmap file(path_to_block_file);
         assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
@@ -328,6 +329,7 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
         std::memcpy(file.data() + file.size() - sizeof(head), &head, sizeof(head)); // tail
         ilog("done.\n");
         file.close();
+        empty_blk.resize(head.static_info.block_size, 0);
     }
     ilog("Set up bitmap..");
     cfs::filesystem disk_file(path_to_block_file);
@@ -335,16 +337,16 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     cfs::cfs_bitmap_block_mirroring_t raid1_bitmap(&disk_file, &journal);
     cfs::cfs_block_attribute_access_t attribute(&disk_file, &journal);
     raid1_bitmap.set_bit(0, true);
-
-    cfs_block_attribute_t attr = {
+    attribute.clear(0,
+    {
         .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
         .block_type = INDEX_NODE_BLOCK,
         .block_type_cow = 0,
         .allocation_oom_scan_per_refresh_count = 0,
         .newly_allocated_thus_no_cow = 0,
         .index_node_referencing_number = 1,
-    };
-    attribute.set(0, attr);
+        .block_checksum = cfs::utils::arithmetic::hash5(empty_blk.data(), empty_blk.size()),
+    });
     ilog("done.\n");
     ilog("CFS format complete\n");
     ilog("Sync data...\n");
@@ -603,7 +605,7 @@ cfs::filesystem::guard_continuous::~guard_continuous()
 
 cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
 {
-    cfs_assert_simple(index <= static_info_.blocks - 1);
+    cfs_assert_simple(index < static_info_.blocks);
     return {&this->bitlocker_,
         this->file_.data() + index * static_info_.block_size,
         index,

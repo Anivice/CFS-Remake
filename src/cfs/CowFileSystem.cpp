@@ -13,8 +13,114 @@
 #include <memory>
 #include <sstream>
 #include "colors.h"
+#include <ranges>
 
-namespace cfs {
+#define print_case(name) case cfs::name: ss << cfs::name##_c_str; break;
+#define print_default(data) default: ss << std::hex << (uint32_t)(data) << std::dec; break;
+
+std::string print_attribute(const uint32_t val)
+{
+    const auto * attr_ = (cfs::cfs_block_attribute_t *)&val;
+    const auto & attr = *attr_;
+    std::stringstream ss;
+    ss << "     Status: ";
+    switch (attr.block_status) {
+        case cfs::BLOCK_AVAILABLE_TO_MODIFY_0x00: ss << "Normal"; break;
+        case cfs::BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01: ss << "Snapshot Entry Point"; break;
+        case cfs::BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02: ss << "Snapshot Regular Block"; break;
+        default: ss << "Unknown (Possibly corruption)"; break;
+    }
+    ss << "\n";
+
+    ss << "     Type:               ";
+    switch (attr.block_type) {
+        case cfs::INDEX_NODE_BLOCK: ss << "Index"; break;
+        case cfs::POINTER_BLOCK: ss << "Pointer"; break;
+        case cfs::STORAGE_BLOCK: ss << "Storage"; break;
+        case cfs::COW_REDUNDANCY_BLOCK: ss << "Redundancy"; break;
+        default: ss << "Unknown (Possibly corruption)"; break;
+    }
+    ss << "\n";
+
+    ss << "     Type (COW Backup):  ";
+    switch (attr.block_type_cow) {
+        case cfs::INDEX_NODE_BLOCK: ss << "Index"; break;
+        case cfs::POINTER_BLOCK: ss << "Pointer"; break;
+        case cfs::STORAGE_BLOCK: ss << "Storage"; break;
+        case cfs::COW_REDUNDANCY_BLOCK: ss << "Redundancy"; break;
+        default: ss << "Unknown (Possibly corruption)"; break;
+    }
+    ss << "\n";
+
+    ss << "     Age:                " << std::dec << attr.allocation_oom_scan_per_refresh_count << " cycles\n";
+    ss << "     New alloc no CoW:   " << (attr.newly_allocated_thus_no_cow ? "True" : "False") << "\n";
+    ss << "     Index referenced:   " << std::dec << attr.index_node_referencing_number << "\n";
+    ss << "     HASH5:              " << std::hex << std::setw(3) << std::setfill('0') << attr.block_checksum << "\n";
+    return ss.str();
+}
+
+#define print_transaction_arg1(name) \
+    case cfs::name:             ss << cfs::name##_c_str << " " << std::dec << action.action_data.action_plain.action_param1; break; \
+    case cfs::name##_Completed: ss << cfs::name##_Completed_c_str; break; \
+    case cfs::name##_Failed:    ss << cfs::name##_Failed_c_str; break;
+
+static std::string translate_action_into_literal(const cfs::cfs_action_t & action)
+{
+    std::stringstream ss;
+    switch (action.action_data.action_plain.action)
+    {
+        print_case(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
+
+        case cfs::CorruptionDetected:
+            ss << cfs::CorruptionDetected_c_str << " ";
+            switch (action.action_data.action_plain.action_param0) {
+                print_case(BitmapMirrorInconsistent);
+                print_case(FilesystemBlockExhausted);
+                print_default(action.action_data.action_plain.action_param0)
+            }
+        break;
+
+        case cfs::FilesystemAttributeModification:
+            if (action.action_data.action_plain.action_param0 == action.action_data.action_plain.action_param1) {
+                ss << cfs::FilesystemAttributeModification_c_str << " ACCESS (Index=" << std::dec << action.action_data.action_plain.action_param2 << ")\n";
+                ss << print_attribute(action.action_data.action_plain.action_param0);
+            } else {
+                ss << cfs::FilesystemAttributeModification_c_str << " MODIFY (Index=" << std::dec << action.action_data.action_plain.action_param2 << ")\n";
+                ss << "Before: \n" << print_attribute(action.action_data.action_plain.action_param0);
+                ss << "After: \n" << print_attribute(action.action_data.action_plain.action_param1);
+            }
+        break;
+
+        case cfs::FilesystemBitmapModification:
+            ss << cfs::FilesystemBitmapModification_c_str
+                << " From " << action.action_data.action_plain.action_param0
+                << " To " << action.action_data.action_plain.action_param1;
+        break;
+
+        case cfs::AttemptedFixFinishedAndAssumedFine:
+            ss << cfs::AttemptedFixFinishedAndAssumedFine_c_str << " ";
+            switch (action.action_data.action_plain.action_param0) {
+                print_case(BitmapMirrorInconsistent);
+                print_case(FilesystemBlockExhausted);
+                print_default(action.action_data.action_plain.action_param0)
+            }
+        break;
+
+        case cfs::GlobalTransaction:
+            ss << cfs::GlobalTransaction_c_str << " ";
+            switch (action.action_data.action_plain.action_param0) {
+                print_transaction_arg1(GlobalTransaction_AllocateBlock);
+                print_transaction_arg1(GlobalTransaction_DeallocateBlock);
+                print_transaction_arg1(GlobalTransaction_CreateRedundancy);
+                print_default(action.action_data.action_plain.action_param0);
+            }
+        break;
+        print_default(action.action_data.action_plain.action);
+    }
+}
+
+namespace cfs
+{
     std::vector<std::string> CowFileSystem::ls_under_pwd_of_cfs(const std::string &)
     {
         return {};
@@ -61,7 +167,7 @@ namespace cfs {
 
                         if (mirrored_bitmap_.get_bit(i))
                         {
-                            switch (const auto attr = block_attribute_.get(i); attr.block_type)
+                            switch (const auto attr = block_attribute_.get<block_type>(i))
                             {
                                 case CowRedundancy:
                                     std::cout << color::color(3,3,3) << "R" << color::no_color();
@@ -86,6 +192,13 @@ namespace cfs {
                     if (fs_bitmap_size % col != 0) {
                         std::cout << "\n";
                     }
+                }
+                else if (vec[2] == "journal")
+                {
+                    const auto journal = this->journaling_.dump_actions();
+                    std::ranges::for_each(journal, [](const cfs_action_t & action) {
+                        std::cout << translate_action_into_literal(action) << std::endl;
+                    });
                 }
             }
         }

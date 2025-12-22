@@ -225,22 +225,292 @@ namespace cfs
     //     bitmap_static_level_access_counter_[index]++;
     //     return ptr->second;
     // }
+    
+    class block_status { };    // => BlockStatusType
+    class block_type { };      // => BlockType
+    class block_type_cow { };
+    class allocation_oom_scan_per_refresh_count { };
+    class newly_allocated_thus_no_cow { };
+    class index_node_referencing_number { }; // Max 0xFFFF (65535) depth of snapshots
+    class block_checksum { };
 
     class cfs_block_attribute_access_t {
         filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
+        cfs::filesystem::block_shared_lock_t location_lock_;
+
     public:
         explicit cfs_block_attribute_access_t(filesystem * parent_fs_governor, cfs_journaling_t * journal);
 
-        /// get the attribute at provided index
-        /// @param index Block index
-        /// @return block attribute
-        [[nodiscard]] cfs_block_attribute_t get(uint64_t index);
+        class smart_lock_t {
+            cfs_block_attribute_t before_ { };
+            cfs_block_attribute_access_t * parent_;
 
-        /// get the attribute at provided index
-        /// @param index Block index
-        /// @param attr New attribute
-        void set(uint64_t index, cfs_block_attribute_t attr);
+        public:
+            cfs_block_attribute_t * data_;
+            cfs_block_attribute_t * operator->() const { return data_; }
+            cfs_block_attribute_t & operator*() const { return *data_; }
+
+        private:
+            const uint64_t index_;
+            explicit smart_lock_t(cfs_block_attribute_access_t * parent, const uint64_t index)
+                : parent_(parent), index_(index)
+            {
+                parent->location_lock_.lock(index);
+                const auto offset = index * sizeof(cfs_block_attribute_t);
+                const auto in_page_offset = offset % parent->parent_fs_governor_->static_info_.block_size;
+                const auto page = offset / parent->parent_fs_governor_->static_info_.block_size +
+                                  parent->parent_fs_governor_->static_info_.data_block_attribute_table_start;
+                const auto pg_data = parent->parent_fs_governor_->lock(page);
+                data_ = (cfs_block_attribute_t*)(void*)(pg_data.data() + in_page_offset);
+                before_ = *data_;
+                parent_->journal_->push_action(FilesystemAttributeModification,
+                    *reinterpret_cast<uint32_t *>(&before_),
+                    *reinterpret_cast<const uint32_t *>(data_),
+                    index_); // init
+            }
+
+        public:
+            ~smart_lock_t()
+            {
+                if (!!std::memcmp(data_, &before_, sizeof(cfs_block_attribute_t))) // if different
+                {
+                    parent_->journal_->push_action(FilesystemAttributeModification,
+                          *reinterpret_cast<uint32_t *>(&before_),
+                          *reinterpret_cast<const uint32_t *>(data_),
+                          index_); // journal set after
+                }
+
+                parent_->journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
+                parent_->location_lock_.unlock(index_);
+            }
+
+            friend class cfs_block_attribute_access_t;
+            NO_COPY_OBJ(smart_lock_t)
+        };
+
+    protected:
+        [[nodiscard]] smart_lock_t lock(const uint64_t index) { return smart_lock_t(this, index); }
+
+    public:
+        template < typename Type >
+        requires (std::is_same_v<Type, block_status>
+            || std::is_same_v<Type, block_type>
+            || std::is_same_v<Type, block_type_cow>
+            || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type, newly_allocated_thus_no_cow>
+            || std::is_same_v<Type, index_node_referencing_number>
+            || std::is_same_v<Type, block_checksum>)
+        uint32_t get(const uint64_t index)
+        {
+            if constexpr (std::is_same_v<Type, block_status>) {
+                return lock(index)->block_status;
+            }
+            else if constexpr (std::is_same_v<Type, block_type>) {
+                return lock(index)->block_type;
+            }
+            else if constexpr (std::is_same_v<Type, block_type_cow>) {
+                return lock(index)->block_type_cow;
+            }
+            else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
+                return lock(index)->allocation_oom_scan_per_refresh_count;
+            }
+            else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
+                return lock(index)->newly_allocated_thus_no_cow;
+            }
+            else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
+                return lock(index)->index_node_referencing_number;
+            }
+            else if constexpr (std::is_same_v<Type, block_checksum>) {
+                return lock(index)->block_checksum;
+            }
+            else {
+                // already guarded in requires
+                return 0;
+            }
+        }
+
+        template < typename Type >
+        requires (std::is_same_v<Type, block_status>
+            || std::is_same_v<Type, block_type>
+            || std::is_same_v<Type, block_type_cow>
+            || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type, newly_allocated_thus_no_cow>
+            || std::is_same_v<Type, index_node_referencing_number>
+            || std::is_same_v<Type, block_checksum>)
+        void set(const uint64_t index, const uint32_t value)
+        {
+            if constexpr (std::is_same_v<Type, block_status>) {
+                lock(index)->block_status = value;
+            }
+            else if constexpr (std::is_same_v<Type, block_type>) {
+                lock(index)->block_type = value;
+            }
+            else if constexpr (std::is_same_v<Type, block_type_cow>) {
+                lock(index)->block_type_cow = value;
+            }
+            else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
+                lock(index)->allocation_oom_scan_per_refresh_count = value;
+            }
+            else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
+                lock(index)->newly_allocated_thus_no_cow = value;
+            }
+            else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
+                lock(index)->index_node_referencing_number = value;
+            }
+            else if constexpr (std::is_same_v<Type, block_checksum>) {
+                lock(index)->block_checksum = value;
+            }
+            else {
+                // already guarded in requires
+            }
+        }
+
+        template < typename Type1, typename Type2 >
+        requires (
+               std::is_same_v<Type1, block_status>
+            || std::is_same_v<Type1, block_type>
+            || std::is_same_v<Type1, block_type_cow>
+            || std::is_same_v<Type1, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type1, newly_allocated_thus_no_cow>
+            || std::is_same_v<Type1, index_node_referencing_number>
+            || std::is_same_v<Type1, block_checksum>
+            || std::is_same_v<Type2, block_status>
+            || std::is_same_v<Type2, block_type>
+            || std::is_same_v<Type2, block_type_cow>
+            || std::is_same_v<Type2, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type2, newly_allocated_thus_no_cow>
+            || std::is_same_v<Type2, index_node_referencing_number>
+            || std::is_same_v<Type2, block_checksum>)
+        void move(const uint64_t index)
+        {
+            const auto lock_ = lock(index);
+            uint32_t val{};
+            if constexpr (std::is_same_v<Type1, block_status>) {
+                val = lock_->block_status;
+            }
+            else if constexpr (std::is_same_v<Type1, block_type>) {
+                val = lock_->block_type;
+            }
+            else if constexpr (std::is_same_v<Type1, block_type_cow>) {
+                val = lock_->block_type_cow;
+            }
+            else if constexpr (std::is_same_v<Type1, allocation_oom_scan_per_refresh_count>) {
+                val = lock_->allocation_oom_scan_per_refresh_count;
+            }
+            else if constexpr (std::is_same_v<Type1, newly_allocated_thus_no_cow>) {
+                val = lock_->newly_allocated_thus_no_cow;
+            }
+            else if constexpr (std::is_same_v<Type1, index_node_referencing_number>) {
+                val = lock_->index_node_referencing_number;
+            }
+            else if constexpr (std::is_same_v<Type1, block_checksum>) {
+                val = lock_->block_checksum;
+            }
+            else {
+                // already guarded in requires
+            }
+            
+            if constexpr (std::is_same_v<Type2, block_status>) {
+                 lock_->block_status = val ;
+            }
+            else if constexpr (std::is_same_v<Type2, block_type>) {
+                 lock_->block_type = val ;
+            }
+            else if constexpr (std::is_same_v<Type2, block_type_cow>) {
+                 lock_->block_type_cow = val ;
+            }
+            else if constexpr (std::is_same_v<Type2, allocation_oom_scan_per_refresh_count>) {
+                 lock_->allocation_oom_scan_per_refresh_count = val ;
+            }
+            else if constexpr (std::is_same_v<Type2, newly_allocated_thus_no_cow>) {
+                 lock_->newly_allocated_thus_no_cow = val ;
+            }
+            else if constexpr (std::is_same_v<Type2, index_node_referencing_number>) {
+                 lock_->index_node_referencing_number = val ;
+            }
+            else if constexpr (std::is_same_v<Type2, block_checksum>) {
+                 lock_->block_checksum = val ;
+            }
+            else {
+                // already guarded in requires
+            }
+        }
+
+        template < typename Type >
+        requires (std::is_same_v<Type, block_status>
+            || std::is_same_v<Type, block_type>
+            || std::is_same_v<Type, block_type_cow>
+            || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type, newly_allocated_thus_no_cow>
+            || std::is_same_v<Type, index_node_referencing_number>
+            || std::is_same_v<Type, block_checksum>)
+        void inc(const uint64_t index, const uint32_t value = 1)
+        {
+            if constexpr (std::is_same_v<Type, block_status>) {
+                lock(index)->block_status += value;
+            }
+            else if constexpr (std::is_same_v<Type, block_type>) {
+                lock(index)->block_type += value;
+            }
+            else if constexpr (std::is_same_v<Type, block_type_cow>) {
+                lock(index)->block_type_cow += value;
+            }
+            else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
+                lock(index)->allocation_oom_scan_per_refresh_count += value;
+            }
+            else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
+                lock(index)->newly_allocated_thus_no_cow += value;
+            }
+            else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
+                lock(index)->index_node_referencing_number += value;
+            }
+            else if constexpr (std::is_same_v<Type, block_checksum>) {
+                lock(index)->block_checksum += value;
+            }
+            else {
+                // already guarded in requires
+            }
+        }
+
+        template < typename Type >
+        requires (std::is_same_v<Type, block_status>
+            || std::is_same_v<Type, block_type>
+            || std::is_same_v<Type, block_type_cow>
+            || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type, newly_allocated_thus_no_cow>
+            || std::is_same_v<Type, index_node_referencing_number>
+            || std::is_same_v<Type, block_checksum>)
+        void dec(const uint64_t index, const uint32_t value = 1)
+        {
+            if constexpr (std::is_same_v<Type, block_status>) {
+                lock(index)->block_status -= value;
+            }
+            else if constexpr (std::is_same_v<Type, block_type>) {
+                lock(index)->block_type -= value;
+            }
+            else if constexpr (std::is_same_v<Type, block_type_cow>) {
+                lock(index)->block_type_cow -= value;
+            }
+            else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
+                lock(index)->allocation_oom_scan_per_refresh_count -= value;
+            }
+            else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
+                lock(index)->newly_allocated_thus_no_cow -= value;
+            }
+            else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
+                lock(index)->index_node_referencing_number -= value;
+            }
+            else if constexpr (std::is_same_v<Type, block_checksum>) {
+                lock(index)->block_checksum -= value;
+            }
+            else {
+                // already guarded in requires
+            }
+        }
+
+        void clear(const uint64_t index, const cfs_block_attribute_t & value = { }) { *lock(index) = value; }
+        friend class smart_lock_t;
     };
 
     /// auto write to journal so I don't have to
@@ -406,7 +676,7 @@ namespace cfs
         };
 
         allocation_map_t reallocate_linearized_block_by_descriptor(const linearized_block_descriptor_t & descriptor);
-        void commit_from_linearized_block(const allocation_map_t & descriptor);
+        void commit_from_linearized_block(allocation_map_t descriptor);
 
         void commit_from_block_descriptor(const linearized_block_descriptor_t & descriptor);
 

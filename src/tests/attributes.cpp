@@ -54,12 +54,12 @@ int main(int argc, char ** argv)
         {
             pthread_setname_np(pthread_self(), ("T" + std::to_string(T)).c_str());
 
-            for (int i = 0; i < len; i++) {
+            for (int i = 0; i < len; i++)
+            {
                 const auto index = index_random();
-                cfs::cfs_block_attribute_t attr {};
-                attr.index_node_referencing_number = bit_random();
-                attribute.set(index, attr);
-                set(index, attr.index_node_referencing_number);
+                const auto bit = bit_random();
+                attribute.set<cfs::index_node_referencing_number>(index, bit);
+                set(index, bit);
             }
         };
 
@@ -73,13 +73,13 @@ int main(int argc, char ** argv)
         std::ranges::for_each(threads, [](std::thread & T) { if (T.joinable()) T.join(); });
 
         std::ranges::for_each(bit_random_map, [&](const std::pair < uint64_t, uint64_t > & pair) {
-            cfs_assert_simple(attribute.get(pair.first).index_node_referencing_number == pair.second);
-            dlog(attribute.get(pair.first).index_node_referencing_number, ", ", pair.second, "\n");
+            cfs_assert_simple(attribute.get<cfs::index_node_referencing_number>(pair.first) == pair.second);
+            dlog(attribute.get<cfs::index_node_referencing_number>(pair.first), ", ", pair.second, "\n");
         });
 
         uint64_t size = 0;
         for (int i = 0; i < len; i++) {
-            size += attribute.get(i).index_node_referencing_number != 0;
+            size += attribute.get<cfs::index_node_referencing_number>(i) != 0;
         }
         cfs_assert_simple(size == bit_random_map.size());
     }
