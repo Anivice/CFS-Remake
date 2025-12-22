@@ -631,7 +631,6 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                 {
                     upper[block_offset].second = true;
                     upper[block_offset].first = new_parent;
-                    dlog("Relink ", parent_blk, " -> ", new_parent, "\n");
                 }
                 std::memcpy(parent_blk_lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
                 block_attribute_->set<newly_allocated_thus_no_cow>(parent_blk, 0);
@@ -663,13 +662,10 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
 
     // record level 1 -> inode
     {
-        std::cout << "LEVEL1: ";
         int offset = 0;
         std::ranges::for_each(descriptor.level1_pointers, [&](const std::pair<uint64_t, bool> & relc) {
             this->cfs_level_1_indexes[offset++] = relc.first;
-            std::cout << relc.first << " ";
         });
-        std::cout << std::endl;
     }
 }
 
