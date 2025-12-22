@@ -696,17 +696,23 @@ namespace cfs
 
         /// lock data block ID
         /// @param index data block ID
+        /// @param linker Linker statement flag. Set to false and attempt to read a pointer will cause error
         /// @return page lock
-        [[nodiscard]] auto lock_page(const uint64_t index)
+        [[nodiscard]] auto lock_page(const uint64_t index, const bool linker = false)
         {
-            cfs_assert_simple(index != block_index_);
+            cfs_assert_simple(index != block_index_
+                && index < (parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start));
+            if (!linker && block_attribute_->get<block_type>(index) == POINTER_BLOCK) {
+                throw cfs::error::assertion_failed("Attempt to read pointer without stating as linker");
+            }
             return page_locker_t(index, parent_fs_governor_, this);
         }
 
         /// copy-on-write for one block
         /// @param index Block index
+        /// @param linker Linker statement flag. Set to false and attempt to read a pointer will cause error
         /// @return Redundancy block index
-        uint64_t copy_on_write(uint64_t index);
+        uint64_t copy_on_write(uint64_t index, bool linker = false);
 
     public:
 

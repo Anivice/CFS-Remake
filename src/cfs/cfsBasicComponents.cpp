@@ -423,34 +423,30 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
     bitmap_->set_bit(index, false);
 }
 
-uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index)
+uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const bool linker)
 {
+    cfs_assert_simple(index != block_index_); // can't CoW on my own. this should be done by dentry
     if (!block_attribute_->get<newly_allocated_thus_no_cow>(index))
     {
         bool success = true;
         const auto new_block = block_manager_->allocate();
+        block_attribute_->clear(new_block, {
+            .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+            .block_type = STORAGE_BLOCK,
+            .block_type_cow = 0,
+            .allocation_oom_scan_per_refresh_count = 0,
+            .newly_allocated_thus_no_cow = 0,
+            .index_node_referencing_number = 0,
+            .block_checksum = 0
+        });
         g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index, new_block);
-        const auto new_ = lock_page(new_block);
-        if (index != block_index_) {
-            const auto old_ = lock_page(index);
-            std::memcpy(new_->data(), old_->data(), block_size_);
-        } else {
-            std::memcpy(new_->data(), inode_effective_lock_.data(), block_size_);
-        }
+        const auto new_ = lock_page(new_block, linker);
+        const auto old_ = lock_page(index, linker);
+        std::memcpy(new_->data(), old_->data(), block_size_);
         return new_block;
     }
 
     block_attribute_->set<newly_allocated_thus_no_cow>(index, 0);
-    if (index != block_index_) {
-        const auto old_ = lock_page(index);
-        block_attribute_->set<block_checksum>(index, utils::arithmetic::hash5(
-            reinterpret_cast<const uint8_t *>(old_->data()), old_->size()));
-    } else {
-        block_attribute_->set<block_checksum>(index, utils::arithmetic::hash5(
-            reinterpret_cast<const uint8_t *>(inode_effective_lock_.data()),
-            inode_effective_lock_.size()));
-    }
-
     return index;
 }
 
@@ -471,7 +467,7 @@ cfs::cfs_inode_service_t::linearized_block_t cfs::cfs_inode_service_t::linearize
         uint64_t index = 0;
         std::ranges::for_each(upper, [&](const uint64_t pointer)
         {
-            auto lock = lock_page(pointer);
+            const auto lock = lock_page(pointer, true);
             const auto length = std::min(lock->size(), (pointers - ret.size()) * sizeof(uint64_t));
             std::vector < uint64_t > new_data;
             new_data.resize(length / sizeof(uint64_t), 0);
@@ -623,20 +619,24 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
 
         auto save = [&]
         {
-            auto & parent_blk = upper[block_offset++].first;
+            const auto parent_blk = upper[block_offset].first;
             if (found_allocator)
             {
-                auto new_blk = copy_on_write(parent_blk);
-                if (parent_blk != new_blk) {
-                    parent_blk = new_blk;
-                    this->block_attribute_->move<block_type, block_type_cow>(parent_blk);
+                const auto new_parent = copy_on_write(parent_blk, true);
+                const auto parent_blk_lock = lock_page(new_parent, true);
+                if (new_parent != parent_blk)
+                {
+                    upper[block_offset].second = true;
+                    upper[block_offset].first = new_parent;
+                    dlog("Relink ", parent_blk, " -> ", new_parent, "\n");
                 }
-                const auto lock = lock_page(parent_blk);
-                std::memcpy(lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
+                std::memcpy(parent_blk_lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
+                block_attribute_->set<newly_allocated_thus_no_cow>(parent_blk, 0);
             }
 
             block_data.clear();
             found_allocator = false;
+            block_offset++;
         };
 
         std::ranges::for_each(lower, [&](const std::pair<uint64_t, bool> & relc)
@@ -660,10 +660,13 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
 
     // record level 1 -> inode
     {
+        std::cout << "LEVEL1: ";
         int offset = 0;
         std::ranges::for_each(descriptor.level1_pointers, [&](const std::pair<uint64_t, bool> & relc) {
             this->cfs_level_1_indexes[offset++] = relc.first;
+            std::cout << relc.first << " ";
         });
+        std::cout << std::endl;
     }
 }
 
@@ -789,7 +792,6 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
 void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
 {
     if (new_size == this->cfs_inode_attribute->st_size) return; // skip size change if no size change is intended
-    copy_on_write(block_index_);
     const auto descriptor = size_to_linearized_block_descriptor(new_size);
     commit_from_block_descriptor(descriptor);
     this->cfs_inode_attribute->st_size = static_cast<decltype(this->cfs_inode_attribute->st_size)>(new_size);
@@ -797,44 +799,37 @@ void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
 
 void cfs::cfs_inode_service_t::chdev(const int dev)
 {
-    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_dev = dev;
 }
 
 void cfs::cfs_inode_service_t::chrdev(const dev_t dev)
 {
-    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_rdev = dev;
 }
 
 void cfs::cfs_inode_service_t::chmod(const int mode)
 {
-    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_mode = mode;
 }
 
 void cfs::cfs_inode_service_t::chown(const int uid, const int gid)
 {
-    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_uid = uid;
     this->cfs_inode_attribute->st_gid = gid;
 }
 
 void cfs::cfs_inode_service_t::set_atime(const timespec st_atim)
 {
-    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_atim = st_atim;
 }
 
 void cfs::cfs_inode_service_t::set_ctime(const timespec st_ctim)
 {
-    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_atim = st_ctim;
 }
 
 void cfs::cfs_inode_service_t::set_mtime(const timespec st_mtim)
 {
-    copy_on_write(block_index_);
     this->cfs_inode_attribute->st_atim = st_mtim;
 }
 

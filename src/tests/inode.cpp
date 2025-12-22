@@ -50,8 +50,14 @@ int main(int argc, char ** argv)
 
         cfs_assert_simple(argc == 5);
         for (int i = 0; i < 5; ++i) {
-            write(argv[1], argv[2]);
-            write(argv[3], argv[4]);
+            const auto out1 = std::to_string(i) + "-" + std::string(argv[2]);
+            const auto out2 = std::to_string(i) + "-" + std::string(argv[4]);
+            dlog("Iteration i=", i, "\n");
+            dlog("Iteration i=", i, " -- First half\n");
+            write(argv[1], out1);
+            dlog("Iteration i=", i, " -- Second half\n");
+            write(argv[3], out2);
+            dlog("Iteration i=", i, " finished\n");
         }
     }
     catch (cfs::error::generalCFSbaseError & e) {
