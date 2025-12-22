@@ -18,6 +18,11 @@
 #define print_case(name) case cfs::name: ss << cfs::name##_c_str; break;
 #define print_default(data) default: ss << std::hex << (uint32_t)(data) << std::dec; break;
 
+#define replicate(name, sss) \
+    case cfs::name:             ss  << highlight(cfs::name##_c_str)             << sss; break; \
+    case cfs::name##_Completed: ss  << highlight(cfs::name##_Completed_c_str)   << sss; break; \
+    case cfs::name##_Failed:    ss  << highlight(cfs::name##_Failed_c_str)      << sss; break;
+
 std::string print_attribute(const uint32_t val)
 {
     const auto * attr_ = (cfs::cfs_block_attribute_t *)&val;
@@ -60,46 +65,48 @@ std::string print_attribute(const uint32_t val)
 }
 
 #define print_transaction_arg1(name) \
-    case cfs::name:             ss << cfs::name##_c_str << " " << std::dec << action.action_data.action_plain.action_param1; break; \
-    case cfs::name##_Completed: ss << cfs::name##_Completed_c_str; break; \
-    case cfs::name##_Failed:    ss << cfs::name##_Failed_c_str; break;
+    case cfs::name:             ss  << highlight(cfs::name##_c_str) << " " \
+                                    << std::dec << highlight_pos(action.action_data.action_plain.action_param1); break; \
+    case cfs::name##_Completed: ss  << highlight(cfs::name##_Completed_c_str) << " " \
+                                    << std::dec << highlight_pos(action.action_data.action_plain.action_param1); break; \
+    case cfs::name##_Failed:    ss  << highlight(cfs::name##_Failed_c_str) << " " \
+                                    << std::dec << highlight_pos(action.action_data.action_plain.action_param1); break;
 
 static std::string translate_action_into_literal(const cfs::cfs_action_t & action)
 {
+    using namespace cfs::color;
     std::stringstream ss;
+
+    auto highlight = [](const std::string & str)->std::string {
+        std::string replc = str;
+        cfs::utils::replace_all(replc, "_Completed", "");
+        cfs::utils::replace_all(replc, "_Failed", "");
+        const auto crc16 = CRC16::DDS_110::calc((const uint8_t*)replc.data(), replc.size());
+        return color(crc16 & 0x1F,(crc16 >> 5) & 0x1F,(crc16 >> 10) & 0x1F) + str + no_color();
+    };
+
+    auto highlight_val = [](const uint64_t val)->std::string {
+        return color(0,5,5) + std::to_string(val) + no_color();
+    };
+
+    auto highlight_pos = [](const uint64_t val)->std::string {
+        return color(5,0,5) + std::to_string(val) + no_color();
+    };
+
     switch (action.action_data.action_plain.action)
     {
-        print_case(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
-
         case cfs::CorruptionDetected:
-            ss << cfs::CorruptionDetected_c_str << " ";
+            ss << color(0,0,0,5,0,0) << cfs::CorruptionDetected_c_str << " Type: " << color(5,0,0);
             switch (action.action_data.action_plain.action_param0) {
                 print_case(BitmapMirrorInconsistent);
                 print_case(FilesystemBlockExhausted);
                 print_default(action.action_data.action_plain.action_param0)
             }
-        break;
-
-        case cfs::FilesystemAttributeModification:
-            if (action.action_data.action_plain.action_param0 == action.action_data.action_plain.action_param1) {
-                ss << cfs::FilesystemAttributeModification_c_str << " ACCESS (Index=" << std::dec << action.action_data.action_plain.action_param2 << ")\n";
-                ss << print_attribute(action.action_data.action_plain.action_param0);
-            } else {
-                ss << cfs::FilesystemAttributeModification_c_str << " MODIFY (Index=" << std::dec << action.action_data.action_plain.action_param2 << ")\n";
-                ss << "Before: \n" << print_attribute(action.action_data.action_plain.action_param0);
-                ss << "After: \n" << print_attribute(action.action_data.action_plain.action_param1);
-            }
-        break;
-
-        case cfs::FilesystemBitmapModification:
-            ss << cfs::FilesystemBitmapModification_c_str
-                << " From " << action.action_data.action_plain.action_param0
-                << " To " << action.action_data.action_plain.action_param1
-                << " At " << action.action_data.action_plain.action_param2;
+            ss << no_color();
         break;
 
         case cfs::AttemptedFixFinishedAndAssumedFine:
-            ss << cfs::AttemptedFixFinishedAndAssumedFine_c_str << " ";
+            ss << highlight(cfs::AttemptedFixFinishedAndAssumedFine_c_str) << " ";
             switch (action.action_data.action_plain.action_param0) {
                 print_case(BitmapMirrorInconsistent);
                 print_case(FilesystemBlockExhausted);
@@ -110,21 +117,21 @@ static std::string translate_action_into_literal(const cfs::cfs_action_t & actio
         case cfs::GlobalTransaction:
             ss << cfs::GlobalTransaction_c_str << " ";
             switch (action.action_data.action_plain.action_param0) {
-                case cfs::GlobalTransaction_AllocateBlock: ss << cfs::GlobalTransaction_AllocateBlock_c_str; break;
-                case cfs::GlobalTransaction_AllocateBlock_Completed: ss << cfs::GlobalTransaction_AllocateBlock_Completed_c_str; break;
-                case cfs::GlobalTransaction_AllocateBlock_Failed: ss << cfs::GlobalTransaction_AllocateBlock_Failed_c_str; break;
+                replicate(GlobalTransaction_AllocateBlock, "");
+                replicate(GlobalTransaction_DeallocateBlock, " At " << highlight_pos(action.action_data.action_plain.action_param1));
+                replicate(GlobalTransaction_CreateRedundancy,
+                        " For " << std::dec << highlight_pos(action.action_data.action_plain.action_param1)
+                        << " At " << highlight_pos(action.action_data.action_plain.action_param2));
+                replicate(FilesystemBitmapModification,
+                        " From " << std::dec << action.action_data.action_plain.action_param1
+                        << " To " << action.action_data.action_plain.action_param2
+                        << " At " << action.action_data.action_plain.action_param3)
 
-                print_transaction_arg1(GlobalTransaction_DeallocateBlock);
-                case cfs::GlobalTransaction_CreateRedundancy:
-                    ss << cfs::GlobalTransaction_CreateRedundancy_c_str << " " << std::dec << action.action_data.action_plain.action_param1;
-                    ss << " At " << action.action_data.action_plain.action_param2;
-                break;
-                case cfs::GlobalTransaction_CreateRedundancy_Completed:
-                    ss << cfs::GlobalTransaction_CreateRedundancy_Completed_c_str;
-                break;
-                case cfs::GlobalTransaction_CreateRedundancy_Failed:
-                    ss << cfs::GlobalTransaction_CreateRedundancy_Failed_c_str;
-                break;
+                // Majors
+                replicate(GlobalTransaction_Major_WriteInode,
+                    " Inode=" << highlight_val(action.action_data.action_plain.action_param1)
+                    << ", Offset=" << highlight_val(action.action_data.action_plain.action_param2)
+                    << ", Size=" << highlight_val(action.action_data.action_plain.action_param3)) // [Which inode] [Offset] [Size]
                 print_default(action.action_data.action_plain.action_param0);
             }
         break;

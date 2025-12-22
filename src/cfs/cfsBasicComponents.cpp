@@ -160,8 +160,10 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
         // if (new_bit == (result & 0x01)) return;
     // }
 
+    bool success = false;
     const auto original = this->get_bit(index);
-    journal_->push_action(FilesystemBitmapModification, original, new_bit, index);
+    g_transaction(journal_, success, FilesystemBitmapModification, original, new_bit, index);
+    // journal_->push_action(FilesystemBitmapModification, original, new_bit, index);
     const auto page_bare = index / (parent_fs_governor_->static_info_.block_size * 8);
     const auto bitmap_01 = parent_fs_governor_->static_info_.data_bitmap_start + page_bare;
     const auto bitmap_02 = parent_fs_governor_->static_info_.data_bitmap_backup_start + page_bare;
@@ -175,7 +177,8 @@ void cfs::cfs_bitmap_block_mirroring_t::set_bit(const uint64_t index, const bool
     auto & header_runtime = parent_fs_governor_->cfs_header_block;
     // header_runtime.set_info<allocation_bitmap_checksum_cow>(header_runtime.get_info<allocation_bitmap_checksum>());
     // header_runtime.set_info<allocation_bitmap_checksum>(mirror1.dump_checksum64());
-    journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
+    // journal_->push_action(ActionFinishedAndNoExceptionCaughtDuringTheOperation);
+    success = true;
 }
 
 cfs::cfs_block_attribute_access_t::cfs_block_attribute_access_t(filesystem *parent_fs_governor,
@@ -418,9 +421,10 @@ uint64_t cfs::cfs_block_manager_t::allocate()
 void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
 {
     cfs_assert_simple(index != 0);
-    bool success = true;
+    bool success = false;
     g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
     bitmap_->set_bit(index, false);
+    success = true;
 }
 
 uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const bool linker)
@@ -428,7 +432,7 @@ uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const boo
     cfs_assert_simple(index != block_index_); // can't CoW on my own. this should be done by dentry
     if (!block_attribute_->get<newly_allocated_thus_no_cow>(index))
     {
-        bool success = true;
+        bool success = false;
         const auto new_block = block_manager_->allocate();
         block_attribute_->clear(new_block, {
             .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
@@ -446,6 +450,7 @@ uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const boo
 
         block_attribute_->move<block_type, block_type_cow>(index); // move block type in old one to cow backup
         block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one aas freeable CoW redundancy
+        success = true;
         return new_block;
     }
 
@@ -744,6 +749,8 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const 
 
 uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, const uint64_t offset)
 {
+    bool success = false;
+    g_transaction(journal_, success, GlobalTransaction_Major_WriteInode, offset, size);
     if (this->cfs_inode_attribute->st_size < (size + offset)) {
         resize(size + offset); // append when short
     }
@@ -824,6 +831,7 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
         commit_from_linearized_block(allocation_descriptor);
     }
 
+    success = true;
     return global_write_offset;
 }
 

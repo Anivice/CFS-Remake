@@ -127,15 +127,11 @@ namespace cfs
     enum FilesystemActionType_##name : uint64_t { name = val }; \
     constexpr const char * name##_c_str = CFS_str(name);
 
-    FilesystemActionType_Def(ActionFinishedAndNoExceptionCaughtDuringTheOperation, 0x1000);
-
     FilesystemActionType_Def(CorruptionDetected, 0x2000); // [Corruption Type]
     FilesystemActionType_Def(BitmapMirrorInconsistent, 0x2001);
     FilesystemActionType_Def(FilesystemBlockExhausted, 0x2002);
 
-    FilesystemActionType_Def(FilesystemBitmapModification, 0x2010); // [FROM] [TO] [LOCATION]
     FilesystemActionType_Def(AttemptedFixFinishedAndAssumedFine, 0x2020); // [Corruption Type]
-    FilesystemActionType_Def(FilesystemAttributeModification, 0x2030); // [ORIGINAL] [LOCATION]
 
     FilesystemActionType_Def(GlobalTransaction, 0x3000) // [Transaction Type], [PARAM...]
 
@@ -144,10 +140,17 @@ namespace cfs
     FilesystemActionType_Def(x##_Completed, val + 1); \
     FilesystemActionType_Def(x##_Failed, val + 2);
 
-    GlobalTransaction_Def(GlobalTransaction_AllocateBlock, 0x3001)      // where
-    GlobalTransaction_Def(GlobalTransaction_DeallocateBlock, 0x3004)    // where
-    GlobalTransaction_Def(GlobalTransaction_CreateRedundancy, 0x3007)   // where
+    GlobalTransaction_Def(FilesystemBitmapModification,         0x2010);    // [FROM] [TO] [LOCATION]
+    GlobalTransaction_Def(GlobalTransaction_AllocateBlock,      0x3001)
+    GlobalTransaction_Def(GlobalTransaction_DeallocateBlock,    0x3004)     // [Where]
+    GlobalTransaction_Def(GlobalTransaction_CreateRedundancy,   0x3007)     // [Which] [Where]
 
+    // major change, which are write inode, inode metadata modification, or snapshot creation/revert/deletion
+    GlobalTransaction_Def(GlobalTransaction_Major_WriteInode,         0x300A)     // [Which inode] [Offset] [Size]
+    GlobalTransaction_Def(GlobalTransaction_Major_InodeMetadataModification, 0x300D)     // [Which inode] [CoW Pointer]
+    GlobalTransaction_Def(GlobalTransaction_Major_SnapshotCreation,   0x3010)
+    GlobalTransaction_Def(GlobalTransaction_Major_SnapshotRevert,     0x3013)     // [Version Entry Point]
+    GlobalTransaction_Def(GlobalTransaction_Major_SnapshotDeletion,   0x3016)     // [Version Entry Point]
     /// CFS inode memory mapper
     class cfs_inode_t {
         char * data_ = nullptr;

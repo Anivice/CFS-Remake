@@ -8,7 +8,6 @@
 #include "tsl/hopscotch_map.h"
 
 make_simple_error_class(no_more_free_spaces)
-make_simple_error_class_traceable(tracer)
 
 #define auto_write_two_two(j, f, s_a, s_d, ss_a, ss_d, f_a, f_d)                        \
     cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
@@ -19,26 +18,26 @@ make_simple_error_class_traceable(tracer)
 #define auto_write_three_two(j, f, s_a, s_d, s_dx, ss_a, ss_d, f_a, f_d)                \
     cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
         s_a, s_d, s_dx, 0, 0, 0,                                                        \
-        ss_a, ss_d, 0, 0, 0, 0,                                                         \
-        f_a, f_d, 0, 0, 0, 0)
+        ss_a, ss_d, s_dx, 0, 0, 0,                                                      \
+        f_a, f_d, s_dx, 0, 0, 0)
 
 #define auto_write_four_two(j, f, s_a, s_d, s_dx, s_dx1, ss_a, ss_d, f_a, f_d)          \
     cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
         s_a, s_d, s_dx, s_dx1, 0, 0,                                                    \
-        ss_a, ss_d, 0, 0, 0, 0,                                                         \
-        f_a, f_d, 0, 0, 0, 0)
+        ss_a, ss_d, s_dx, s_dx1, 0, 0,                                                  \
+        f_a, f_d,s_dx, s_dx1, 0, 0)
 
 #define auto_write_five_two(j, f, s_a, s_d, s_dx, s_dx1, s_dx2, ss_a, ss_d, f_a, f_d)   \
     cfs::journal_auto_write_t journal_auto_write(j, f,                                  \
         s_a, s_d, s_dx, s_dx1, s_dx2, 0,                                                \
-        ss_a, ss_d, 0, 0, 0, 0,                                                         \
-        f_a, f_d, 0, 0, 0, 0)
+        ss_a, ss_d, s_dx, s_dx1, s_dx2, 0,                                              \
+        f_a, f_d, s_dx, s_dx1, s_dx2, 0)
 
 #define auto_write_six_two(j, f, s_a, s_d, s_dx, s_dx1, s_dx2, s_dx3, ss_a, ss_d, f_a, f_d)         \
     cfs::journal_auto_write_t journal_auto_write(j, f,                                              \
         s_a, s_d, s_dx, s_dx1, s_dx2, s_dx3,                                                        \
-        ss_a, ss_d, 0, 0, 0, 0,                                                                     \
-        f_a, f_d, 0, 0, 0, 0)
+        ss_a, ss_d, s_dx, s_dx1, s_dx2, s_dx3,                                                      \
+        f_a, f_d, s_dx, s_dx1, s_dx2, s_dx3)
 
 #define g_transaction_3(j, f, act) \
     auto_write_two_two(j, f, GlobalTransaction, act, GlobalTransaction, act##_Completed, GlobalTransaction, act##_Failed)
@@ -238,8 +237,11 @@ namespace cfs
         filesystem * parent_fs_governor_;
         cfs_journaling_t * journal_;
         cfs::filesystem::block_shared_lock_t location_lock_;
+        std::atomic_bool dirty_ = false;
 
     public:
+        bool dirty() { return dirty_; }
+
         explicit cfs_block_attribute_access_t(filesystem * parent_fs_governor, cfs_journaling_t * journal);
 
         class smart_lock_t {
@@ -257,12 +259,6 @@ namespace cfs
 
         public:
             ~smart_lock_t();
-
-            void copy_on_write() {
-                parent_->journal_->push_action(FilesystemAttributeModification,
-                                               *reinterpret_cast<uint32_t *>(&before_),
-                                               index_); // journal set after
-            }
 
             friend class cfs_block_attribute_access_t;
             NO_COPY_OBJ(smart_lock_t)
@@ -381,26 +377,31 @@ namespace cfs
     || std::is_same_v<Type, block_checksum>)
     void cfs_block_attribute_access_t::set(const uint64_t index, const uint32_t value)
     {
+        auto lock_ = lock(index);
+        if (!lock_->newly_allocated_thus_no_cow) {
+            dirty_ = true;
+        }
+
         if constexpr (std::is_same_v<Type, block_status>) {
-            lock(index)->block_status = value;
+            lock_->block_status = value;
         }
         else if constexpr (std::is_same_v<Type, block_type>) {
-            lock(index)->block_type = value;
+            lock_->block_type = value;
         }
         else if constexpr (std::is_same_v<Type, block_type_cow>) {
-            lock(index)->block_type_cow = value;
+            lock_->block_type_cow = value;
         }
         else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
-            lock(index)->allocation_oom_scan_per_refresh_count = value;
+            lock_->allocation_oom_scan_per_refresh_count = value;
         }
         else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            lock(index)->newly_allocated_thus_no_cow = value;
+            lock_->newly_allocated_thus_no_cow = value;
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
-            lock(index)->index_node_referencing_number = value;
+            lock_->index_node_referencing_number = value;
         }
         else if constexpr (std::is_same_v<Type, block_checksum>) {
-            lock(index)->block_checksum = value;
+            lock_->block_checksum = value;
         }
         else {
             // already guarded in requires
@@ -425,7 +426,10 @@ namespace cfs
     || std::is_same_v<Type2, block_checksum>)
     void cfs_block_attribute_access_t::move(const uint64_t index)
     {
-        const auto lock_ = lock(index);
+        auto lock_ = lock(index);
+        if (!lock_->newly_allocated_thus_no_cow) {
+            dirty_ = true;
+        }
         uint32_t val{};
         if constexpr (std::is_same_v<Type1, block_status>) {
             val = lock_->block_status;
@@ -488,26 +492,30 @@ namespace cfs
     || std::is_same_v<Type, block_checksum>)
     void cfs_block_attribute_access_t::inc(const uint64_t index, const uint32_t value)
     {
+        auto lock_ = lock(index);
+        if (!lock_->newly_allocated_thus_no_cow) {
+            dirty_ = true;
+        }
         if constexpr (std::is_same_v<Type, block_status>) {
-            lock(index)->block_status += value;
+            lock_->block_status += value;
         }
         else if constexpr (std::is_same_v<Type, block_type>) {
-            lock(index)->block_type += value;
+            lock_->block_type += value;
         }
         else if constexpr (std::is_same_v<Type, block_type_cow>) {
-            lock(index)->block_type_cow += value;
+            lock_->block_type_cow += value;
         }
         else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
-            lock(index)->allocation_oom_scan_per_refresh_count += value;
+            lock_->allocation_oom_scan_per_refresh_count += value;
         }
         else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            lock(index)->newly_allocated_thus_no_cow += value;
+            lock_->newly_allocated_thus_no_cow += value;
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
-            lock(index)->index_node_referencing_number += value;
+            lock_->index_node_referencing_number += value;
         }
         else if constexpr (std::is_same_v<Type, block_checksum>) {
-            lock(index)->block_checksum += value;
+            lock_->block_checksum += value;
         }
         else {
             // already guarded in requires
@@ -524,26 +532,30 @@ namespace cfs
     || std::is_same_v<Type, block_checksum>)
     void cfs_block_attribute_access_t::dec(const uint64_t index, const uint32_t value)
     {
+        auto lock_ = lock(index);
+        if (!lock_->newly_allocated_thus_no_cow) {
+            dirty_ = true;
+        }
         if constexpr (std::is_same_v<Type, block_status>) {
-            lock(index)->block_status -= value;
+            lock_->block_status -= value;
         }
         else if constexpr (std::is_same_v<Type, block_type>) {
-            lock(index)->block_type -= value;
+            lock_->block_type -= value;
         }
         else if constexpr (std::is_same_v<Type, block_type_cow>) {
-            lock(index)->block_type_cow -= value;
+            lock_->block_type_cow -= value;
         }
         else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
-            lock(index)->allocation_oom_scan_per_refresh_count -= value;
+            lock_->allocation_oom_scan_per_refresh_count -= value;
         }
         else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            lock(index)->newly_allocated_thus_no_cow -= value;
+            lock_->newly_allocated_thus_no_cow -= value;
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
-            lock(index)->index_node_referencing_number -= value;
+            lock_->index_node_referencing_number -= value;
         }
         else if constexpr (std::is_same_v<Type, block_checksum>) {
-            lock(index)->block_checksum -= value;
+            lock_->block_checksum -= value;
         }
         else {
             // already guarded in requires
