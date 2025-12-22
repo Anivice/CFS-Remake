@@ -94,7 +94,8 @@ static std::string translate_action_into_literal(const cfs::cfs_action_t & actio
         case cfs::FilesystemBitmapModification:
             ss << cfs::FilesystemBitmapModification_c_str
                 << " From " << action.action_data.action_plain.action_param0
-                << " To " << action.action_data.action_plain.action_param1;
+                << " To " << action.action_data.action_plain.action_param1
+                << " At " << action.action_data.action_plain.action_param2;
         break;
 
         case cfs::AttemptedFixFinishedAndAssumedFine:
@@ -109,9 +110,21 @@ static std::string translate_action_into_literal(const cfs::cfs_action_t & actio
         case cfs::GlobalTransaction:
             ss << cfs::GlobalTransaction_c_str << " ";
             switch (action.action_data.action_plain.action_param0) {
-                print_transaction_arg1(GlobalTransaction_AllocateBlock);
+                case cfs::GlobalTransaction_AllocateBlock: ss << cfs::GlobalTransaction_AllocateBlock_c_str; break;
+                case cfs::GlobalTransaction_AllocateBlock_Completed: ss << cfs::GlobalTransaction_AllocateBlock_Completed_c_str; break;
+                case cfs::GlobalTransaction_AllocateBlock_Failed: ss << cfs::GlobalTransaction_AllocateBlock_Failed_c_str; break;
+
                 print_transaction_arg1(GlobalTransaction_DeallocateBlock);
-                print_transaction_arg1(GlobalTransaction_CreateRedundancy);
+                case cfs::GlobalTransaction_CreateRedundancy:
+                    ss << cfs::GlobalTransaction_CreateRedundancy_c_str << " " << std::dec << action.action_data.action_plain.action_param1;
+                    ss << " At " << action.action_data.action_plain.action_param2;
+                break;
+                case cfs::GlobalTransaction_CreateRedundancy_Completed:
+                    ss << cfs::GlobalTransaction_CreateRedundancy_Completed_c_str;
+                break;
+                case cfs::GlobalTransaction_CreateRedundancy_Failed:
+                    ss << cfs::GlobalTransaction_CreateRedundancy_Failed_c_str;
+                break;
                 print_default(action.action_data.action_plain.action_param0);
             }
         break;
@@ -211,11 +224,14 @@ namespace cfs
                     const auto len = this->cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
                     for (uint64_t i = 0; i < len; i++)
                     {
-                        auto pg = cfs_basic_filesystem_.lock(i + cfs_basic_filesystem_.static_info_.data_table_start);
-                        const uint8_t checksum = cfs::utils::arithmetic::hash5((uint8_t*)pg.data(), pg.size());
-                        const auto comp = block_attribute_.get<block_checksum>(i);
-                        if (!block_attribute_.get<newly_allocated_thus_no_cow>(i) && comp != checksum) {
-                            elog(std::dec, "Checksum mismatch at block index ", i, ", attribute says it's ", (uint8_t)comp, ", but we have ", checksum, "\n");
+                        if (mirrored_bitmap_.get_bit(i))
+                        {
+                            auto pg = cfs_basic_filesystem_.lock(i + cfs_basic_filesystem_.static_info_.data_table_start);
+                            const uint8_t checksum = cfs::utils::arithmetic::hash5((uint8_t*)pg.data(), pg.size());
+                            const auto comp = block_attribute_.get<block_checksum>(i);
+                            if (!block_attribute_.get<newly_allocated_thus_no_cow>(i) && comp != checksum) {
+                                elog(std::dec, "Checksum mismatch at block index ", i, ", attribute says it's ", (uint8_t)comp, ", but we have ", checksum, "\n");
+                            }
                         }
                     }
                 }

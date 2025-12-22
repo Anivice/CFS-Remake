@@ -28,7 +28,7 @@ int main(int argc, char ** argv)
             for (int i = 0; i < 127;)
             {
                 try {
-                    auto lock = fs.lock(index, index + 1);
+                    auto lock = fs.lock(index);
                     const char c = *lock.data();
                     std::memset(lock.data(), i ^ (index & 0xFF), lock.size());
                     *lock.data() = c + 1;

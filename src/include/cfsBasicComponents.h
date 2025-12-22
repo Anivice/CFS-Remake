@@ -635,6 +635,7 @@ namespace cfs
 
     class cfs_inode_service_t : protected cfs_inode_t
     {
+        std::vector < uint8_t > before_;
         filesystem::guard inode_effective_lock_;
         filesystem * parent_fs_governor_;
         cfs_block_manager_t * block_manager_;
@@ -661,12 +662,45 @@ namespace cfs
             uint64_t level3_pointers;
         };
 
+        class page_locker_t
+        {
+            filesystem::guard lock_;
+            cfs_inode_service_t * parent_;
+            std::vector < uint8_t > before_;
+            const uint64_t index_;
+
+        public:
+            const filesystem::guard * operator->() const { return &lock_; }
+
+            page_locker_t(
+                const uint64_t index,
+                filesystem * fs,
+                cfs_inode_service_t * parent)
+            : lock_(fs->lock(index + fs->static_info_.data_table_start)), parent_(parent), index_(index)
+            {
+                before_.resize(lock_.size());
+                std::memcpy(before_.data(), lock_.data(), lock_.size());
+            }
+
+            ~page_locker_t()
+            {
+                if (!!std::memcpy(before_.data(), lock_.data(), lock_.size())) {
+                    parent_->block_attribute_->set<block_checksum>(index_,
+                        utils::arithmetic::hash5(reinterpret_cast<uint8_t *>(lock_.data()), lock_.size())
+                    );
+                }
+            }
+        };
+
+        friend class page_locker_t;
+
         /// lock data block ID
         /// @param index data block ID
         /// @return page lock
-        [[nodiscard]] auto lock_page(const uint64_t index) const {
+        [[nodiscard]] auto lock_page(const uint64_t index)
+        {
             cfs_assert_simple(index != block_index_);
-            return parent_fs_governor_->lock(index + parent_fs_governor_->static_info_.data_table_start);
+            return page_locker_t(index, parent_fs_governor_, this);
         }
 
         /// copy-on-write for one block
@@ -678,7 +712,7 @@ namespace cfs
 
         /// Linearize all blocks by st_size
         /// @return linearized pointers in std::vector <uint64_t> * 3 struct
-        [[nodiscard]] linearized_block_t linearize_all_blocks() const;
+        [[nodiscard]] linearized_block_t linearize_all_blocks();
 
         /// calculate how many pointers for each level
         /// @return pointers required for each level for this particular size
@@ -725,7 +759,9 @@ namespace cfs
             cfs_journaling_t * journal,
             cfs_block_attribute_access_t * block_attribute);
 
-        uint64_t read(char * data, uint64_t size, uint64_t offset) const;
+        ~cfs_inode_service_t();
+
+        uint64_t read(char * data, uint64_t size, uint64_t offset);
         uint64_t write(const char * data, uint64_t size, uint64_t offset);
 
         /// resize this inode

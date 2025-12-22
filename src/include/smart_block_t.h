@@ -80,6 +80,10 @@ namespace cfs
     /// @throws cfs::error::cannot_discard_blocks Cannot discard blocks on block devices
     void make_cfs(const std::string &path_to_block_file, uint64_t block_size, const std::string & label);
 
+    template < typename F> concept DestroyCallBackFunction = requires(F f, const uint64_t c) {
+        { std::invoke(f, c) } -> std::same_as<void>;
+    };
+
     class cfs_bitmap_block_mirroring_t;
     class cfs_journaling_t;
 
@@ -247,7 +251,14 @@ namespace cfs
             /// @param block_address block ID
             /// @param block_size Block size
             /// @throws cfs::error::assertion_failed out of bounds
-            guard(block_shared_lock_t * bitlocker, char * data, uint64_t block_address, uint64_t block_size);
+            guard(block_shared_lock_t *bitlocker, char *data, const uint64_t block_address, const uint64_t block_size)
+                :
+            bitlocker_(bitlocker),
+            data_(data),
+            block_address_(block_address),
+            block_size_(block_size) {
+                bitlocker_->lock(block_address_);
+            }
 
         public:
             /// @throws cfs::error::assertion_failed out of bounds
@@ -265,52 +276,11 @@ namespace cfs
             friend class filesystem;
         };
 
-        /// lock guard
-        class guard_continuous {
-        private:
-            block_shared_lock_t * bitlocker_;
-            char * data_;
-            const uint64_t start_;
-            const uint64_t end_;
-            const uint64_t block_size_;
-
-            /// make lock guard (continuous)
-            /// @param bitlocker global lock
-            /// @param data block data
-            /// @param start Region block ID to lock (start)
-            /// @param end Region block ID to lock (end)
-            /// @param block_size Block size
-            /// @throws cfs::error::assertion_failed out of bounds
-            guard_continuous(block_shared_lock_t * bitlocker, char * data, uint64_t start, uint64_t end, uint64_t block_size);
-
-        public:
-            /// @throws cfs::error::assertion_failed out of bounds
-            ~guard_continuous();
-
-            /// get the address of the currently locked block page
-            /// @return data pointer
-            [[nodiscard]] char * data() const noexcept { return data_; }
-
-            /// return accessible size
-            /// @return accessible size
-            [[nodiscard]] uint64_t size() const noexcept { return (end_ - start_ + 1) * block_size_; }
-
-            NO_COPY_OBJ(guard_continuous);
-            friend class filesystem;
-        };
-
         /// Lock a certain block
         /// @param index Block ID to lock
         /// @return lock_guard
         /// @throws cfs::error::assertion_failed Invalid arguments
         [[nodiscard]] guard lock(uint64_t index);
-
-        /// Lock a region of blocks
-        /// @param start Region block ID to lock (start)
-        /// @param end Region block ID to lock (end)
-        /// @return lock_guard
-        /// @throws cfs::error::assertion_failed Invalid arguments
-        [[nodiscard]] guard_continuous lock(uint64_t start, uint64_t end);
 
         /// flush all data, write clean flag, close file
         ~filesystem() noexcept;
