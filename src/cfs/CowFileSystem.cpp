@@ -15,6 +15,8 @@
 #include "colors.h"
 #include <ranges>
 #include "inode.h"
+#include <fcntl.h>
+#include <unistd.h>
 
 #define print_case(name) case cfs::name: ss << cfs::name##_c_str; break;
 #define print_default(data) default: ss << std::hex << (uint32_t)(data) << std::dec; break;
@@ -294,35 +296,27 @@ namespace cfs
 
     void CowFileSystem::ls(const std::vector<std::string> &vec)
     {
-        auto ls = [&](std::string path)
+        auto ls = [&](std::string path)->void
         {
-            cfs::dentry_t::dentry_pairs_t list;
-            {
-                path = path_calculator(path);
-                const auto vpath = path_to_vector(path);
-                const auto [child, parent] = deference_inode_from_path(vpath);
-                if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR)
-                {
-                    auto dentry = dynamic_cast<dentry_t*>(child.get());
-                    list = dentry->ls();
-                }
-                else {
-                    elog("Inode is not a dentry\n");
-                    return;
-                }
+            path = path_calculator(path);
+            std::vector<std::string> list;
+            const int result_readdir = do_readdir(path, list);
+            if (result_readdir != 0) {
+                elog("Error: ", strerror(-result_readdir), "\n");
+                return;
             }
 
-            for (const auto & name : list | std::views::keys) {
-                const auto child_path = path_calculator(path + "/" + name);
-                const auto child_vpath = path_to_vector(child_path);
-                const auto [child, parent] = deference_inode_from_path(child_vpath);
-                const auto stat = child->get_stat();
-                if ((stat.st_mode & S_IFMT) == S_IFDIR) {
-                    std::cout << name << "/" << "\t" << stat.st_size << std::endl;
-                } else {
-                    std::cout << name << "\t" << stat.st_size << std::endl;
+            std::ranges::for_each(list, [&](const std::string & path_)
+            {
+                const std::string tpath = path_calculator(path + "/" + path_);
+                struct stat st{};
+                const int result_getattr = do_getattr(tpath, &st);
+                if (result_getattr != 0) {
+                    elog("Error: ", strerror(-result_getattr), " when reading attributes for ", path_, "\n");
                 }
-            }
+
+                std::cout << path_ << ((st.st_mode & S_IFMT) == S_IFDIR ? "/" : "") << std::endl;
+            });
         };
 
         if (vec.size() == 1) // no args
@@ -344,15 +338,58 @@ namespace cfs
         }
     }
 
+    void CowFileSystem::copy_to_host(const std::vector<std::string> &vec)
+    {
+        if (vec.size() != 3)
+        {
+            elog("copy_to_host [CFS Path] [Host Path]\n");
+        }
+        else
+        {
+            const auto cfs_path = path_calculator(vec[1]);
+            const auto host_full_path = vec[2];
+            struct stat status {};
+            const int result = do_getattr(cfs_path, &status);
+            if (result != 0) {
+                elog("getattr:", strerror(-result), "\n");
+            } else {
+                const int fd = ::open(host_full_path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
+                if (fd < 0) {
+                    elog("open:", strerror(errno), "\n");
+                } else {
+                    std::vector<char> data;
+                    data.resize(4096);
+                    uint64_t offset = 0;
+                    while (const auto rSize = do_read(cfs_path, data.data(), data.size(), offset)) {
+                        ::write(fd, data.data(), rSize);
+                        offset += rSize;
+                    }
+                    close(fd);
+                }
+            }
+        }
+    }
+
+    void CowFileSystem::copy_from_host(const std::vector<std::string> &vec)
+    {
+        if (vec.size() != 3) {
+            elog("copy_from_host [Host Path] [CFS Path]\n");
+        } else {
+            const cfs::basic_io::mmap file(vec[1]); // test data
+            const auto path = path_calculator(vec[2]);
+            do_fallocate(path, S_IFREG | 0755, 0, file.size());
+            do_write(path, file.data(), file.size(), 0);
+        }
+    }
+
     std::vector<std::string> CowFileSystem::path_to_vector(const std::string &path) noexcept
     {
         std::vector<std::string> result;
         std::stringstream ss(path);
         char c;
         std::string buf;
-        while (!ss.eof())
+        while (ss >> c)
         {
-            ss >> c;
             if (c == '/')
             {
                 if (!buf.empty()) {
@@ -388,7 +425,7 @@ namespace cfs
         return make_child_inode<dentry_t>(cfs_basic_filesystem_.cfs_header_block.get_info<root_inode_pointer>(), nullptr);
     }
 
-    CowFileSystem::deferenced_pairs_t CowFileSystem::deference_inode_from_path(vpath_t path) noexcept
+    CowFileSystem::deferenced_pairs_t CowFileSystem::deference_inode_from_path(vpath_t path)
     {
         if (!path.empty())
         {
@@ -873,6 +910,15 @@ namespace cfs
         return status;
     }
 
+    std::string CowFileSystem::auto_path(const std::string & path)
+    {
+        if (!path.empty() && path.front() == '/') {
+            return path_calculator(path);
+        }
+
+        return path_calculator(cfs_pwd_ + "/" + path);
+    }
+
     bool CowFileSystem::command_main_entry_point(const std::vector<std::string> &vec)
     {
         if (vec.empty()) return true;
@@ -892,6 +938,12 @@ namespace cfs
         }
         else if (vec.front() == "ls") {
             ls(vec);
+        }
+        else if (vec.front() == "copy_to_host") {
+            copy_to_host(vec);
+        }
+        else if (vec.front() =="copy_from_host") {
+            copy_from_host(vec);
         }
         else if (vec.front() == "debug" && vec.size() >= 2)
         {

@@ -674,6 +674,19 @@ namespace cfs
         /// @param descriptor descriptor table
         void commit_from_block_descriptor(const linearized_block_descriptor_t & descriptor);
 
+        /// resize this inode
+        /// @param new_size New size
+        void resize_unblocked(uint64_t new_size);
+
+        /// write to inode data
+        /// write automatically resizes when offset+size > st_size, but will not shrink
+        /// you have to call resize(0) to shrink the inode
+        /// @param data src
+        /// @param size write size
+        /// @param offset write offset
+        /// @return size written
+        uint64_t write_unblocked(const char * data, uint64_t size, uint64_t offset, bool hole_write = false);
+
     public:
         /// Create a low level inode service routine
         /// @param index Inode index
@@ -704,7 +717,10 @@ namespace cfs
         /// @param size write size
         /// @param offset write offset
         /// @return size written
-        uint64_t write(const char * data, uint64_t size, uint64_t offset, bool hole_write = false);
+        uint64_t write(const char * data, uint64_t size, uint64_t offset) {
+            std::lock_guard<std::mutex> lock_guard_(mutex_);
+            return write_unblocked(data, size, offset);
+        }
 
         // !!! The following are metadata editing functions that should be called from inode_t
         // to create copy-on-write redundancies, which, inode service routine is incapable of doing !!!

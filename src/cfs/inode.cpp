@@ -94,30 +94,28 @@ std::vector<uint8_t> cfs::inode_t::dump_inode_raw() const
     return my_data;
 }
 
-void cfs::inode_t::copy_on_write()
+void cfs::inode_t::copy_on_write() // CoW entry
 {
     const std::vector<uint8_t> my_data = dump_inode_raw();
-    const auto new_inode_num_ = parent_inode_->inode_copy_on_write(current_referenced_inode_, my_data); // upload
-    if (new_inode_num_ != current_referenced_inode_) // I got referenced
+    if (parent_inode_ != nullptr)
     {
-        const auto old_ = current_referenced_inode_;
-        current_referenced_inode_ = new_inode_num_; // get new inode
-        referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
-                                                                  inode_construct_info_.parent_fs_governor,
-                                                                  inode_construct_info_.block_manager,
-                                                                  inode_construct_info_.journal,
-                                                                  inode_construct_info_.block_attribute); // relocate reference
-        inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
-        inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+        const auto new_inode_num_ = parent_inode_->inode_copy_on_write(current_referenced_inode_, my_data); // upload
+        if (new_inode_num_ != current_referenced_inode_) // I got referenced
+        {
+            const auto old_ = current_referenced_inode_;
+            current_referenced_inode_ = new_inode_num_; // get new inode
+            referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
+                                                                      inode_construct_info_.parent_fs_governor,
+                                                                      inode_construct_info_.block_manager,
+                                                                      inode_construct_info_.journal,
+                                                                      inode_construct_info_.block_attribute); // relocate reference
+            inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
+            inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+        }
     }
-}
-
-uint64_t cfs::inode_t::inode_copy_on_write(const uint64_t cow_index, const std::vector<uint8_t> &content)
-{
-    std::lock_guard lock(operation_mutex_);
-    std::vector<uint8_t> data_;
-    if (parent_inode_ == nullptr) // Root inode, write inode into metadata dentry section
+    else
     {
+        std::vector<uint8_t> data_;
         // create a new block
         const auto new_inode_num_ = inode_construct_info_.block_manager->allocate();
         // set attributes
@@ -202,60 +200,55 @@ uint64_t cfs::inode_t::inode_copy_on_write(const uint64_t cow_index, const std::
         inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
         inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
     }
-    else if (inode_type() == S_IFDIR) // dentry, but not root
+}
+
+uint64_t cfs::inode_t::inode_copy_on_write(const uint64_t cow_index, const std::vector<uint8_t> &content)
+{
+    copy_on_write(); // relink
+
+    /// check if child needs a reference
+    if (!inode_construct_info_.block_attribute->get<newly_allocated_thus_no_cow>(cow_index))
     {
-        copy_on_write(); // relink
+        // now, we start to change current dentry reference
+        const auto ptr = dentry_map_reversed_search_map_.find(cow_index);
+        cfs_assert_simple(ptr != dentry_map_reversed_search_map_.end());
+        const auto name = ptr->second;
+        dentry_map_reversed_search_map_.erase(ptr);
+        const auto ptr_ = dentry_map_.find(name);
+        cfs_assert_simple(ptr_ != dentry_map_.end());
+        dentry_map_.erase(ptr_);
 
-        /// check if child needs a reference
-        if (!inode_construct_info_.block_attribute->get<newly_allocated_thus_no_cow>(cow_index))
-        {
-            // now, we start to change current dentry reference
-            const auto ptr = dentry_map_reversed_search_map_.find(cow_index);
-            cfs_assert_simple(ptr != dentry_map_reversed_search_map_.end());
-            const auto name = ptr->second;
-            dentry_map_reversed_search_map_.erase(ptr);
-            const auto ptr_ = dentry_map_.find(name);
-            cfs_assert_simple(ptr_ != dentry_map_.end());
-            dentry_map_.erase(ptr_);
+        // copy over
+        const auto new_block = inode_construct_info_.block_manager->allocate();
+        const auto new_lock = referenced_inode_->lock_page(new_block);
+        cfs_assert_simple(content.size() == static_info_->block_size);
+        std::memcpy(new_lock->data(), content.data(), content.size());
+        // set attributes
+        inode_construct_info_.block_attribute->clear(new_block, {
+                                                         .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+                                                         .block_type = INDEX_NODE_BLOCK,
+                                                         .block_type_cow = 0,
+                                                         .allocation_oom_scan_per_refresh_count = 0,
+                                                         .newly_allocated_thus_no_cow = 0,
+                                                         .index_node_referencing_number = 1,
+                                                         .block_checksum = 0,
+                                                     });
+        // child old block redefined as cow by themselves
 
-            // copy over
-            const auto new_block = inode_construct_info_.block_manager->allocate();
-            const auto new_lock = referenced_inode_->lock_page(new_block);
-            cfs_assert_simple(content.size() == static_info_->block_size);
-            std::memcpy(new_lock->data(), content.data(), content.size());
-            // set attributes
-            inode_construct_info_.block_attribute->clear(new_block, {
-                                                             .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-                                                             .block_type = INDEX_NODE_BLOCK,
-                                                             .block_type_cow = 0,
-                                                             .allocation_oom_scan_per_refresh_count = 0,
-                                                             .newly_allocated_thus_no_cow = 0,
-                                                             .index_node_referencing_number = 1,
-                                                             .block_checksum = 0,
-                                                         });
-            // child old block redefined as cow by themselves
+        // new pair: name, new_block, relink here
+        dentry_map_.emplace(name, new_block);
+        dentry_map_reversed_search_map_.emplace(new_block, name);
 
-            // new pair: name, new_block, relink here
-            dentry_map_.emplace(name, new_block);
-            dentry_map_reversed_search_map_.emplace(new_block, name);
+        // write to dentry
+        dentry_start_ = 0;
+        referenced_inode_->resize(0); // clear old data
+        save_dentry_unblocked(); // write
 
-            // write to dentry
-            dentry_start_ = 0;
-            referenced_inode_->resize(0); // clear old data
-            save_dentry_unblocked(); // write
-
-            // return the new block to child
-            return new_block;
-        }
-
-        return cow_index; // now reference, return their own CoW
-    }
-    else // WTF? how did a non-dentry block receive a fucking CoW from its "child," it has no child!
-    {
-        throw cfs::error::assertion_failed("Non-dentry received CoW notification from non-existing children"); // yeah you check call tree
+        // return the new block to child
+        return new_block;
     }
 
-    return cow_index;
+    return cow_index; // now reference, return their own CoW
 }
 
 cfs::inode_t::inode_t(

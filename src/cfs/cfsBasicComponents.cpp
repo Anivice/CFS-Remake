@@ -678,6 +678,14 @@ void cfs::cfs_inode_service_t::commit_from_block_descriptor(const linearized_blo
     return commit_from_linearized_block(reallocate_linearized_block_by_descriptor(descriptor));
 }
 
+void cfs::cfs_inode_service_t::resize_unblocked(const uint64_t new_size)
+{
+    if (new_size == this->cfs_inode_attribute->st_size) return; // skip size change if no size change is intended
+    const auto descriptor = size_to_linearized_block_descriptor(new_size);
+    commit_from_block_descriptor(descriptor);
+    this->cfs_inode_attribute->st_size = static_cast<decltype(this->cfs_inode_attribute->st_size)>(new_size);
+}
+
 cfs::cfs_inode_service_t::cfs_inode_service_t(
     const uint64_t index,
     filesystem *parent_fs_governor,
@@ -708,10 +716,15 @@ cfs::cfs_inode_service_t::~cfs_inode_service_t()
     }
 }
 
-uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const uint64_t offset)
+uint64_t cfs::cfs_inode_service_t::read(char * data, uint64_t size, const uint64_t offset)
 {
     std::lock_guard<std::mutex> lock_guard_(mutex_);
     if (this->cfs_inode_attribute->st_size == 0) return 0; // skip read if size is 0
+    if (this->cfs_inode_attribute->st_size > offset) return 0; // skip read if offset is larger than inode size
+    if (this->cfs_inode_attribute->st_size > (offset + size)) {
+        size = this->cfs_inode_attribute->st_size - offset; // resize when short read
+    }
+
     const auto [level1, level2, level3] = linearize_all_blocks();
     const auto skipped_blocks = offset / block_size_;
     const auto skipped_bytes = offset % block_size_;
@@ -747,20 +760,19 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const 
     return global_read_offset;
 }
 
-uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, const uint64_t offset, const bool hole_write)
+uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint64_t size, const uint64_t offset, const bool hole_write)
 {
-    std::lock_guard<std::mutex> lock_guard_(mutex_);
     bool success = false;
     g_transaction(journal_, success, GlobalTransaction_Major_WriteInode, offset, size);
     if (this->cfs_inode_attribute->st_size < (size + offset)) {
         const auto old_ = this->cfs_inode_attribute->st_size;
-        resize(size + offset); // append when short
+        resize_unblocked(size + offset); // append when short
         // check how much need to we append
         if (offset > old_) {
             // we have holes
             uint64_t hole_size = offset - old_; // skipped and not written size
             uint64_t hole_offset = old_; // starts from old end
-            write(nullptr, hole_size, hole_offset, true);
+            write_unblocked(nullptr, hole_size, hole_offset, true);
         }
     }
 
@@ -854,10 +866,7 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
 void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
 {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (new_size == this->cfs_inode_attribute->st_size) return; // skip size change if no size change is intended
-    const auto descriptor = size_to_linearized_block_descriptor(new_size);
-    commit_from_block_descriptor(descriptor);
-    this->cfs_inode_attribute->st_size = static_cast<decltype(this->cfs_inode_attribute->st_size)>(new_size);
+    resize_unblocked(new_size);
 }
 
 void cfs::cfs_inode_service_t::chdev(const int dev)

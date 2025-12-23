@@ -44,6 +44,8 @@ namespace cfs
         void debug_cat_attribute(const std::vector<std::string> &vec);
         void debug_check_hash5();
         void ls(const std::vector<std::string> &vec);
+        void copy_to_host(const std::vector<std::string> &vec);
+        void copy_from_host(const std::vector<std::string> &vec);
 
         /// turn path into vector
         std::vector<std::string> path_to_vector(const std::string & path) noexcept;
@@ -71,7 +73,9 @@ namespace cfs
             return InodeType(index, &cfs_basic_filesystem_, &block_manager_, &journaling_, &block_attribute_, parent);
         }
 
-        deferenced_pairs_t deference_inode_from_path(vpath_t) noexcept;
+        deferenced_pairs_t deference_inode_from_path(vpath_t);
+
+        std::string auto_path(const std::string & path);
 
     public:
         /// get attributes from an inode by path
