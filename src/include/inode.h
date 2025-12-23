@@ -11,25 +11,25 @@ namespace cfs
 
     /// inode
     class inode_t {
-    private:
+    protected:
         struct {
             filesystem * parent_fs_governor;
             cfs_block_manager_t * block_manager;
             cfs_journaling_t * journal;
             cfs_block_attribute_access_t * block_attribute;
-        } inode_construct_info_;
+        } inode_construct_info_ { };
 
         inode_t * parent_inode_; /// parent
         std::unique_ptr < cfs_inode_service_t > referenced_inode_; /// referenced inode
         uint64_t current_referenced_inode_; /// referenced inode number
         const decltype(inode_construct_info_.parent_fs_governor->static_info_) * static_info_; /// static info so I don't have to type
+        uint64_t dentry_start_ = 0; /// dentry info offset, for root metadata jump
 
         std::mutex dentry_map_mutex_; /// dentry map mutex lock
         tsl::hopscotch_map<std::string, uint64_t> dentry_map_; /// name -> inode dentry
         tsl::hopscotch_map<uint64_t, std::string> dentry_map_reversed_search_map_; /// reversed search map, inode -> name
-        uint64_t dentry_start_ = 0; /// dentry info offset, for root metadata jump
 
-        int inode_type() const { return referenced_inode_->get_stat().st_mode & S_IFMT; } // POSIX types
+        [[nodiscard]] mode_t inode_type() const { return referenced_inode_->get_stat().st_mode & S_IFMT; } // POSIX types
 
         // [DENTRY SIGNARURE] -> cfs_magick_number
         // LZ4 Compression size [int]
@@ -48,7 +48,6 @@ namespace cfs
         /// CoW. if CoW happened, current inode reference will be changed automatically
         void copy_on_write();
 
-    public:
         /// CoW on dentry level.
         /// Changes will be reflected from child to parent one by one until it reaches root
         /// where it effectively saves all fs info before any changes occur, thus snapshots can have their
@@ -63,6 +62,8 @@ namespace cfs
         uint64_t inode_copy_on_write(uint64_t cow_index, const std::vector<uint8_t> & content);
 
     public:
+        NO_COPY_OBJ(inode_t)
+
         /// Create an inode
         /// @param index Inode index
         /// @param parent_fs_governor
@@ -87,7 +88,7 @@ namespace cfs
         /// @param size read size
         /// @param offset read offset
         /// @return size read
-        uint64_t read(char * data, uint64_t size, uint64_t offset) const;
+        virtual uint64_t read(char * data, uint64_t size, uint64_t offset) const;
 
         /// write to inode data.
         /// write automatically resizes when offset+size > st_size, but will not shrink.
@@ -96,11 +97,80 @@ namespace cfs
         /// @param size write size
         /// @param offset write offset
         /// @return size written
-        uint64_t write(const char * data, uint64_t size, uint64_t offset);
+        virtual uint64_t write(const char * data, uint64_t size, uint64_t offset);
+
+        /// Return inode content size
+        uint64_t size() const { return referenced_inode_->cfs_inode_attribute->st_size; }
+
+        virtual ~inode_t() = default;
+    };
+
+    class file_t : public inode_t {
+    public:
+        NO_COPY_OBJ(file_t)
+
+        /// Create a non-dentry inode
+        /// @param index Inode index
+        /// @param parent_fs_governor
+        /// @param block_manager
+        /// @param journal
+        /// @param block_attribute
+        /// @param parent_inode Parent inode, always dentry_t
+        file_t(
+            const uint64_t index,
+            filesystem * parent_fs_governor,
+            cfs_block_manager_t * block_manager,
+            cfs_journaling_t * journal,
+            cfs_block_attribute_access_t * block_attribute,
+            inode_t * parent_inode)
+        : inode_t(index, parent_fs_governor, block_manager, journal, block_attribute, parent_inode)
+        {
+            cfs_assert_simple(inode_t::inode_type() != S_IFDIR);
+        }
     };
 
     class dentry_t : public inode_t {
     public:
+        NO_COPY_OBJ(dentry_t)
+
+        /// Create a non-dentry inode
+        /// @param index Inode index
+        /// @param parent_fs_governor
+        /// @param block_manager
+        /// @param journal
+        /// @param block_attribute
+        /// @param parent_inode Parent inode, always dentry_t
+        dentry_t(
+            const uint64_t index,
+            filesystem * parent_fs_governor,
+            cfs_block_manager_t * block_manager,
+            cfs_journaling_t * journal,
+            cfs_block_attribute_access_t * block_attribute,
+            inode_t * parent_inode)
+        : inode_t(index, parent_fs_governor, block_manager, journal, block_attribute, parent_inode)
+        {
+            cfs_assert_simple(inode_t::inode_type() == S_IFDIR);
+            std::lock_guard lock(dentry_map_mutex_);
+            read_dentry_unblocked();
+        }
+
+        using dentry_pairs_t = std::vector<std::pair<std::string, uint64_t>>;
+
+        /// List all dentries under current dentry_t
+        dentry_pairs_t ls();
+
+        /// unlink one inode
+        /// @param name Inode name
+        void unlink(const std::string & name);
+
+        /// create an inode under current dentry
+        /// @param name Inode dentry name
+        /// @return New inode
+        template < class InodeType >
+        InodeType make_inode(const std::string & name)
+        {
+
+        }
     };
 }
 

@@ -31,6 +31,61 @@ void cfs::inode_t::save_dentry_unblocked()
     referenced_inode_->write((char*)buffer_.data(), buffer_.size(), dentry_start_);
 }
 
+void cfs::inode_t::read_dentry_unblocked()
+{
+    std::vector<uint8_t> buffer_(size(), 0);
+    read((char*)buffer_.data(), buffer_.size(), 0);
+    dentry_map_.clear();
+    dentry_map_reversed_search_map_.clear();
+    if (buffer_.size() < sizeof(uint64_t)) {
+        return;
+    }
+
+    const uint64_t * magic = (uint64_t*)buffer_.data();
+    for (uint64_t i = 0; i < (buffer_.size() - 8); i++)
+    {
+        if (*magic == cfs_magick_number) {
+            dentry_start_ = i;
+            break;
+        }
+    }
+
+    // decompress expects size to be at the end of the stream
+    const auto cSize = buffer_.begin() + dentry_start_ + sizeof(cfs_magick_number);
+    std::vector dentry_data_(cSize + sizeof(int), buffer_.end());
+    dentry_data_.insert(dentry_data_.end(), cSize, cSize + sizeof(int));
+
+    // decompress data
+    const auto decompressed = utils::arithmetic::decompress(dentry_data_);
+
+    std::string name;
+    uint64_t ptr;
+    int offset = 0;
+    bool name_is_true_ptr_is_false = true;
+    std::ranges::for_each(decompressed, [&](const char c)
+    {
+        if (name_is_true_ptr_is_false)
+        {
+            if (c == 0) {
+                name_is_true_ptr_is_false = false;
+                return;
+            }
+
+            name += c;
+        }
+        else
+        {
+            ((char*)(&ptr))[offset++] = c;
+            if (offset == sizeof(uint64_t))
+            {
+                dentry_map_.emplace(name, ptr);
+                dentry_map_reversed_search_map_.emplace(ptr, name);
+                name_is_true_ptr_is_false = true;
+            }
+        }
+    });
+}
+
 std::vector<uint8_t> cfs::inode_t::dump_inode_raw() const
 {
     std::vector<uint8_t> my_data;
@@ -239,4 +294,39 @@ uint64_t cfs::inode_t::write(const char *data, const uint64_t size, const uint64
 {
     copy_on_write(); // relink
     return referenced_inode_->write(data, size, offset);
+}
+
+cfs::dentry_t::dentry_pairs_t cfs::dentry_t::ls()
+{
+    // updated from disk and should change sync with the memory so, just read memory
+    dentry_pairs_t pairs;
+    std::lock_guard<std::mutex> lock(dentry_map_mutex_);
+    for (const auto& [name, pointer] : dentry_map_) {
+        pairs.emplace_back(name, pointer);
+    }
+    return pairs;
+}
+
+void cfs::dentry_t::unlink(const std::string & name)
+{
+    copy_on_write(); // relink
+
+    std::lock_guard<std::mutex> lock(dentry_map_mutex_);
+    const auto it = dentry_map_.find(name);
+    cfs_assert_simple(it != dentry_map_.end());
+    uint64_t inode_pointer = it->second;
+
+    // remove child from dentry
+    dentry_map_.erase(it);
+    dentry_map_reversed_search_map_.erase(inode_pointer);
+    save_dentry_unblocked();
+
+    /// create child inode
+    cfs_inode_service_t target(inode_pointer,
+            inode_construct_info_.parent_fs_governor,
+            inode_construct_info_.block_manager,
+            inode_construct_info_.journal,
+            inode_construct_info_.block_attribute);
+    target.resize(0); // remove all data in inode pointers
+    inode_construct_info_.block_manager->deallocate(inode_pointer); // remove child inode
 }

@@ -388,7 +388,12 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
     // cfs_assert_simple(index != 0);
     bool success = false;
     g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
-    bitmap_->set_bit(index, false);
+
+    if (block_attribute_->get<index_node_referencing_number>(index) <= 1) {
+        bitmap_->set_bit(index, false);
+    } else {
+        block_attribute_->dec<index_node_referencing_number>(index);
+    }
     success = true;
 }
 

@@ -312,23 +312,13 @@ namespace cfs
         void move(uint64_t index);
 
         template < typename Type >
-        requires (std::is_same_v<Type, block_status>
-            || std::is_same_v<Type, block_type>
-            || std::is_same_v<Type, block_type_cow>
-            || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-            || std::is_same_v<Type, newly_allocated_thus_no_cow>
-            || std::is_same_v<Type, index_node_referencing_number>
-            || std::is_same_v<Type, block_checksum>)
+        requires (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type, index_node_referencing_number>)
         void inc(uint64_t index, uint32_t value = 1);
 
         template < typename Type >
-        requires (std::is_same_v<Type, block_status>
-            || std::is_same_v<Type, block_type>
-            || std::is_same_v<Type, block_type_cow>
-            || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-            || std::is_same_v<Type, newly_allocated_thus_no_cow>
-            || std::is_same_v<Type, index_node_referencing_number>
-            || std::is_same_v<Type, block_checksum>)
+        requires (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+            || std::is_same_v<Type, index_node_referencing_number>)
         void dec(uint64_t index, uint32_t value = 1);
 
         void clear(const uint64_t index, const cfs_block_attribute_t & value = { }) { *lock(index) = value; }
@@ -357,9 +347,9 @@ namespace cfs
         else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
             return lock(index)->allocation_oom_scan_per_refresh_count;
         }
-        // else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            // return lock(index)->newly_allocated_thus_no_cow;
-        // }
+        else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
+            return lock(index)->newly_allocated_thus_no_cow;
+        }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
             return lock(index)->index_node_referencing_number;
         }
@@ -488,39 +478,19 @@ namespace cfs
     }
 
     template<typename Type>
-    requires (std::is_same_v<Type, block_status>
-    || std::is_same_v<Type, block_type>
-    || std::is_same_v<Type, block_type_cow>
-    || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-    || std::is_same_v<Type, newly_allocated_thus_no_cow>
-    || std::is_same_v<Type, index_node_referencing_number>
-    || std::is_same_v<Type, block_checksum>)
+    requires (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+        || std::is_same_v<Type, index_node_referencing_number>)
     void cfs_block_attribute_access_t::inc(const uint64_t index, const uint32_t value)
     {
-        auto lock_ = lock(index);
-        // if (!lock_->newly_allocated_thus_no_cow) {
-            // dirty_ = true;
-        // }
-        if constexpr (std::is_same_v<Type, block_status>) {
-            lock_->block_status += value;
-        }
-        else if constexpr (std::is_same_v<Type, block_type>) {
-            lock_->block_type += value;
-        }
-        else if constexpr (std::is_same_v<Type, block_type_cow>) {
-            lock_->block_type_cow += value;
-        }
-        else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
-            lock_->allocation_oom_scan_per_refresh_count += value;
-        }
-        else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            lock_->newly_allocated_thus_no_cow += value;
+        const auto lock_ = lock(index);
+        if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
+            if (lock_->allocation_oom_scan_per_refresh_count < 0xF) { // only 4 bits
+                lock_->allocation_oom_scan_per_refresh_count += value;
+            }
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
+            cfs_assert_simple(lock_->allocation_oom_scan_per_refresh_count < 0xFFFF); // 16 bits
             lock_->index_node_referencing_number += value;
-        }
-        else if constexpr (std::is_same_v<Type, block_checksum>) {
-            lock_->block_checksum += value;
         }
         else {
             // already guarded in requires
@@ -528,39 +498,20 @@ namespace cfs
     }
 
     template<typename Type>
-    requires (std::is_same_v<Type, block_status>
-    || std::is_same_v<Type, block_type>
-    || std::is_same_v<Type, block_type_cow>
-    || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-    || std::is_same_v<Type, newly_allocated_thus_no_cow>
-    || std::is_same_v<Type, index_node_referencing_number>
-    || std::is_same_v<Type, block_checksum>)
+    requires (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
+        || std::is_same_v<Type, index_node_referencing_number>)
     void cfs_block_attribute_access_t::dec(const uint64_t index, const uint32_t value)
     {
-        auto lock_ = lock(index);
-        // if (!lock_->newly_allocated_thus_no_cow) {
-            // dirty_ = true;
-        // }
-        if constexpr (std::is_same_v<Type, block_status>) {
-            lock_->block_status -= value;
-        }
-        else if constexpr (std::is_same_v<Type, block_type>) {
-            lock_->block_type -= value;
-        }
-        else if constexpr (std::is_same_v<Type, block_type_cow>) {
-            lock_->block_type_cow -= value;
-        }
-        else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
-            lock_->allocation_oom_scan_per_refresh_count -= value;
-        }
-        else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            lock_->newly_allocated_thus_no_cow -= value;
+        const auto lock_ = lock(index);
+        if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
+            if (lock_->allocation_oom_scan_per_refresh_count > value) {
+                lock_->allocation_oom_scan_per_refresh_count -= value;
+            }
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
-            lock_->index_node_referencing_number -= value;
-        }
-        else if constexpr (std::is_same_v<Type, block_checksum>) {
-            lock_->block_checksum -= value;
+            if (lock_->index_node_referencing_number > value) {
+                lock_->index_node_referencing_number -= value;
+            }
         }
         else {
             // already guarded in requires
