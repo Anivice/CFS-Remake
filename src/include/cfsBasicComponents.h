@@ -712,7 +712,7 @@ namespace cfs
         /// @param index data block ID
         /// @param linker Linker statement flag. Set to false and attempt to read a pointer will cause error
         /// @return page lock
-        [[nodiscard]] auto lock_page(uint64_t index, bool linker = false);
+        [[nodiscard]] page_locker_t lock_page(uint64_t index, bool linker = false);
 
         /// copy-on-write for one block
         /// @param index Block index
@@ -806,7 +806,7 @@ namespace cfs
         /// @param size write size
         /// @param offset write offset
         /// @return size written
-        uint64_t write(const char * data, uint64_t size, uint64_t offset);
+        uint64_t write(const char * data, uint64_t size, uint64_t offset, bool hole_write = false);
 
         // !!! The following are metadata editing functions that should be called from inode_t
         // to create copy-on-write redundancies, which, inode service routine is incapable of doing !!!

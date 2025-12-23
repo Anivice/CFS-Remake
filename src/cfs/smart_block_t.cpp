@@ -324,11 +324,12 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     close(fd);
     ilog("Discarding finished\n");
     std::vector<uint8_t> empty_blk;
+    cfs_head_t head;
     {
         basic_io::mmap file(path_to_block_file);
         assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
         ilog("Calculating CFS info...\n");
-        const auto head = make_head(file.size(), block_size, label);
+        head = make_head(file.size(), block_size, label);
         ilog("Calculating CFS info done.\n");
         ilog("Writing header to file...");
         std::memcpy(file.data(), &head, sizeof(head)); // head
@@ -353,6 +354,24 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
         .index_node_referencing_number = 1,
         .block_checksum = cfs::utils::arithmetic::hash5(empty_blk.data(), empty_blk.size()),
     });
+    const auto root = disk_file.lock(head.static_info.data_table_start);
+    const auto now = utils::get_timespec();
+    struct stat root_stat = {
+        .st_dev = 0,
+        .st_ino = 0,
+        .st_nlink = 1,
+        .st_mode = S_IFDIR | 0755,
+        .st_uid = getuid(),
+        .st_gid = getgid(),
+        .st_rdev = 0,
+        .st_size = 0,
+        .st_blksize = static_cast<decltype(root_stat.st_blksize)>(head.static_info.block_size),
+        .st_blocks = 0,
+        .st_atim = now,
+        .st_mtim = now,
+        .st_ctim = now,
+    };
+    std::memcpy(root.data(), &root_stat, sizeof(root_stat));
     ilog("done.\n");
     ilog("CFS format complete\n");
     ilog("Sync data...\n");

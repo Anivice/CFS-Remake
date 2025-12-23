@@ -35,6 +35,26 @@ int main(int argc, char ** argv)
         raid1_bitmap.set_bit(1, true);
         block_attribute.set<cfs::block_type>(1, cfs::INDEX_NODE_BLOCK);
         cfs::inode_t inode(0, &fs, &block_manager, &journal, &block_attribute, nullptr);
+        {
+            const auto lock = fs.lock(fs.static_info_.data_table_start + 1);
+            const auto now = cfs::utils::get_timespec();
+            struct stat inode1_stat = {
+                .st_dev = 0,
+                .st_ino = 1,
+                .st_nlink = 1,
+                .st_mode = S_IFREG | 0777,
+                .st_uid = getuid(),
+                .st_gid = getgid(),
+                .st_rdev = 0,
+                .st_size = 0,
+                .st_blksize = 512,
+                .st_blocks = 0,
+                .st_atim = now,
+                .st_mtim = now,
+                .st_ctim = now,
+            };
+            std::memcpy(lock.data(), &inode1_stat, sizeof(inode1_stat));
+        }
         cfs::inode_t inode1(1, &fs, &block_manager, &journal, &block_attribute, &inode);
 
         auto write = [&](const std::string & input, const std::string & output)
@@ -63,8 +83,6 @@ int main(int argc, char ** argv)
             write(argv[3], out2);
             dlog("Iteration i=", i, " finished\n");
         }
-
-        inode.inode_copy_on_write(1);
     }
     catch (cfs::error::generalCFSbaseError & e) {
         elog(e.what(), "\n");

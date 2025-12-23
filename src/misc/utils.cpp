@@ -92,6 +92,13 @@ uint64_t cfs::utils::get_timestamp() noexcept
     return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
+timespec cfs::utils::get_timespec() noexcept
+{
+    timespec ts;
+    timespec_get(&ts, TIME_UTC);
+    return ts;
+}
+
 uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_size, const uint64_t particles)
 {
     assert_throw(cell_size != 0, "DIV/0");

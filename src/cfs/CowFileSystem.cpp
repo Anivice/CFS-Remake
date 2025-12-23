@@ -188,13 +188,9 @@ namespace cfs
                             std::cout << "\n";
                         }
 
-                        if (mirrored_bitmap_.get_bit(i))
-                        {
-                            switch (const auto attr = block_attribute_.get<block_type>(i))
+                        auto show_bit = [](const uint32_t attr) {
+                            switch (attr)
                             {
-                                case CowRedundancy:
-                                    std::cout << color::color(3,3,3) << "R" << color::no_color();
-                                    break;
                                 case IndexNode:
                                     std::cout << color::color(0,0,5) << "I" << color::no_color();
                                     break;
@@ -206,6 +202,19 @@ namespace cfs
                                     break;
                                 default:
                                     std::cout << color::color(5,5,5) << "x" << color::no_color();
+                            }
+                        };
+
+                        if (mirrored_bitmap_.get_bit(i))
+                        {
+                            switch (const auto attr = block_attribute_.get<block_type>(i))
+                            {
+                                case CowRedundancy:
+                                    std::cout << color::bg_color(1,1,1);
+                                    show_bit(block_attribute_.get<block_type_cow>(i));
+                                    break;
+                                default:
+                                    show_bit(attr);
                             }
                         } else {
                             std::cout << ".";

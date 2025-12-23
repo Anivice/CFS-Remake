@@ -401,7 +401,7 @@ cfs::cfs_inode_service_t::page_locker_t::~page_locker_t()
     }
 }
 
-auto cfs::cfs_inode_service_t::lock_page(const uint64_t index, const bool linker)
+cfs::cfs_inode_service_t::page_locker_t cfs::cfs_inode_service_t::lock_page(const uint64_t index, const bool linker)
 {
     cfs_assert_simple(index != block_index_
         && index < (parent_fs_governor_->static_info_.data_table_end - parent_fs_governor_->static_info_.data_table_start));
@@ -424,7 +424,7 @@ uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const boo
             .block_type_cow = 0,
             .allocation_oom_scan_per_refresh_count = 0,
             .newly_allocated_thus_no_cow = 0,
-            .index_node_referencing_number = 0,
+            .index_node_referencing_number = 1,
             .block_checksum = 0
         });
         g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index, new_block);
@@ -433,7 +433,6 @@ uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const boo
         std::memcpy(new_->data(), old_->data(), block_size_);
 
         block_attribute_->move<block_type, block_type_cow>(index); // move block type in old one to cow backup
-        block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one aas freeable CoW redundancy
         success = true;
         return new_block;
     }
@@ -509,7 +508,6 @@ cfs::cfs_inode_service_t::size_to_linearized_block_descriptor(const uint64_t siz
 cfs::cfs_inode_service_t::allocation_map_t
 cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linearized_block_descriptor_t &descriptor)
 {
-    // copy_on_write(block_index_); // cow on inode TODO: Do this in dentry, now inode
     auto alloc = [&](const uint8_t blk_type)->uint64_t
     {
         parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
@@ -616,7 +614,7 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
             {
                 const auto new_parent = copy_on_write(parent_blk, true);
                 const auto parent_blk_lock = lock_page(new_parent, true);
-                if (new_parent != parent_blk)
+                if (new_parent != parent_blk) // relink
                 {
                     block_attribute_->set<block_type>(new_parent, POINTER_BLOCK);
                     upper[block_offset].second = true;
@@ -624,6 +622,9 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                 }
                 std::memcpy(parent_blk_lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
                 block_attribute_->set<newly_allocated_thus_no_cow>(parent_blk, 0);
+                if (new_parent != parent_blk) {
+                    block_attribute_->set<block_type>(parent_blk, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+                }
             }
 
             block_data.clear();
@@ -699,7 +700,7 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const 
     const auto [level1, level2, level3] = linearize_all_blocks();
     const auto skipped_blocks = offset / block_size_;
     const auto skipped_bytes = offset % block_size_;
-    const auto bytes_to_read_in_the_first_block = std::min(size - skipped_bytes, block_size_ - skipped_bytes);
+    const auto bytes_to_read_in_the_first_block = std::min(size, block_size_ - skipped_bytes);
     const auto bytes_to_read_in_the_following_blocks = size - bytes_to_read_in_the_first_block;
     const auto adjacent_full_blocks = bytes_to_read_in_the_following_blocks / block_size_;
     const auto bytes_to_read_in_the_last_block = bytes_to_read_in_the_following_blocks % block_size_;
@@ -731,12 +732,20 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const 
     return global_read_offset;
 }
 
-uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, const uint64_t offset)
+uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, const uint64_t offset, const bool hole_write)
 {
     bool success = false;
     g_transaction(journal_, success, GlobalTransaction_Major_WriteInode, offset, size);
     if (this->cfs_inode_attribute->st_size < (size + offset)) {
+        const auto old_ = this->cfs_inode_attribute->st_size;
         resize(size + offset); // append when short
+        // check how much need to we append
+        if (offset > old_) {
+            // we have holes
+            uint64_t hole_size = offset - old_; // skipped and not written size
+            uint64_t hole_offset = old_; // starts from old end
+            write(nullptr, hole_size, hole_offset, true);
+        }
     }
 
     const auto [level1, level2, level3] = linearize_all_blocks();
@@ -744,14 +753,18 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
     tsl::hopscotch_map<uint64_t, uint64_t> relink_map;
     const auto skipped_blocks = offset / block_size_;
     const auto skipped_bytes = offset % block_size_;
-    const auto bytes_to_write_in_the_first_block = std::min(size - skipped_bytes, block_size_ - skipped_bytes);
+    const auto bytes_to_write_in_the_first_block = std::min(size, block_size_ - skipped_bytes);
     const auto bytes_to_write_in_the_following_blocks = size - bytes_to_write_in_the_first_block;
     const auto adjacent_full_blocks = bytes_to_write_in_the_following_blocks / block_size_;
     const auto bytes_to_write_in_the_last_block = bytes_to_write_in_the_following_blocks % block_size_;
     uint64_t global_write_offset = 0;
     auto copy_to_buffer = [&](void * ptr, const uint64_t r_size)
     {
-        std::memcpy(ptr, data + global_write_offset, r_size);
+        if (hole_write) {
+            std::memset(ptr, 0, r_size);
+        } else {
+            std::memcpy(ptr, data + global_write_offset, r_size);
+        }
         global_write_offset += r_size;
     };
 
@@ -765,6 +778,9 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
 
         const auto lock = lock_page(new_blk);
         copy_to_buffer(lock->data(), w_size);
+        if (new_blk != index) {
+            block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+        }
     };
 
     auto init_alloc_map_from_vec = [&](const std::vector<uint64_t> & list,

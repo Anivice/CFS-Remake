@@ -7,6 +7,7 @@
 #include <vector>
 #include "lz4.h"
 #include "cppcrc.h"
+#include <ctime>
 
 /// Utilities
 namespace cfs::utils
@@ -70,6 +71,10 @@ namespace cfs::utils
     /// Return current UNIX timestamp
     /// @return Current UNIX timestamp
     uint64_t get_timestamp() noexcept;
+
+    /// Return current timespec
+    /// @return Current timespec
+    timespec get_timespec() noexcept;
 }
 
 #define NO_COPY_OBJ(name)                                       \
