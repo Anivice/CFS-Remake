@@ -2,6 +2,7 @@
 
 void cfs::inode_t::save_dentry_unblocked()
 {
+    if (dentry_map_.empty()) return;
     std::vector<uint8_t> buffer_;
     buffer_.clear();
     buffer_.reserve(dentry_map_.size() * 32);
@@ -20,40 +21,49 @@ void cfs::inode_t::save_dentry_unblocked()
     }
 
     auto compressed = utils::arithmetic::compress(buffer_);
-    const int size = *(int*)(compressed.data() + compressed.size() - sizeof(int));
-    compressed.resize(compressed.size() - sizeof(int));
+    const uint64_t size = *(uint64_t*)(compressed.data() + compressed.size() - sizeof(uint64_t));
+    compressed.resize(compressed.size() - sizeof(uint64_t));
     buffer_.clear();
-    buffer_.reserve(size + sizeof(cfs_magick_number) + sizeof(int));
+    buffer_.reserve(size + sizeof(cfs_magick_number) + sizeof(uint64_t));
     /// Write dentry data
     save_bytes(cfs_magick_number);
     save_bytes(size);
     buffer_.insert(buffer_.end(), compressed.begin(), compressed.end());
-    referenced_inode_->write((char*)buffer_.data(), buffer_.size(), dentry_start_);
+    referenced_inode_->resize(dentry_start_ + buffer_.size() + sizeof(dentry_start_));
+    referenced_inode_->write((char*)buffer_.data(), buffer_.size(), dentry_start_ + sizeof(dentry_start_));
 }
 
 void cfs::inode_t::read_dentry_unblocked()
 {
-    std::vector<uint8_t> buffer_(size(), 0);
-    referenced_inode_->read((char*)buffer_.data(), buffer_.size(), 0);
-    dentry_map_.clear();
-    dentry_map_reversed_search_map_.clear();
-    if (buffer_.size() < sizeof(uint64_t)) {
+    if (size() < sizeof(uint64_t)) {
         return;
     }
 
+    referenced_inode_->read((char*)dentry_start_, sizeof(dentry_start_), 0);
+    dentry_map_.clear();
+    dentry_map_reversed_search_map_.clear();
+    std::vector<uint8_t> buffer_(size() - dentry_start_, 0);
+    referenced_inode_->read((char*)buffer_.data(), buffer_.size(), dentry_start_);
+
+    bool found = false;
     const uint64_t * magic = (uint64_t*)buffer_.data();
     for (uint64_t i = 0; i < (buffer_.size() - 8); i++)
     {
         if (*magic == cfs_magick_number) {
             dentry_start_ = i;
+            found = true;
             break;
         }
     }
 
+    if (!found) {
+        return;
+    }
+
     // decompress expects size to be at the end of the stream
     const auto cSize = buffer_.begin() + dentry_start_ + sizeof(cfs_magick_number);
-    std::vector dentry_data_(cSize + sizeof(int), buffer_.end());
-    dentry_data_.insert(dentry_data_.end(), cSize, cSize + sizeof(int));
+    std::vector dentry_data_(cSize + sizeof(uint64_t), buffer_.end());
+    dentry_data_.insert(dentry_data_.end(), cSize, cSize + sizeof(uint64_t));
 
     // decompress data
     const auto decompressed = utils::arithmetic::decompress(dentry_data_);
@@ -99,7 +109,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
     const std::vector<uint8_t> my_data = dump_inode_raw();
     if (parent_inode_ != nullptr)
     {
-        const auto new_inode_num_ = parent_inode_->inode_copy_on_write(current_referenced_inode_, my_data); // upload
+        const auto new_inode_num_ = parent_inode_->relink_on_dentry(current_referenced_inode_, my_data); // upload
         if (new_inode_num_ != current_referenced_inode_) // I got referenced
         {
             const auto old_ = current_referenced_inode_;
@@ -181,16 +191,22 @@ void cfs::inode_t::copy_on_write() // CoW entry
         write_to_buffer(inode_metadata);
 
         const auto data_compressed = utils::arithmetic::compress(data_);
-        int size = *(int*)(data_compressed.data() + data_compressed.size() - sizeof(int)); // size is at the end of the stream
+        uint64_t size = *(uint64_t*)(data_compressed.data() + data_compressed.size() - sizeof(uint64_t)); // size is at the end of the stream
         // we need to move it to the front
+
+        dentry_start_ = data_compressed.size() + sizeof(dentry_start_); // so save_dentry_unblocked() knows where to continue
+
+        offset = 0;
+
         referenced_inode_->resize(0);
-        referenced_inode_->write((char*)&size, sizeof(size), 0);
-        referenced_inode_->write((char*)data_compressed.data(), data_compressed.size() - sizeof(int), sizeof(int));
+        offset += referenced_inode_->write((char*)&dentry_start_, sizeof(dentry_start_), offset);
+        offset += referenced_inode_->write((char*)&size, sizeof(size), offset);
+        offset += referenced_inode_->write((char*)data_compressed.data(), data_compressed.size() - sizeof(uint64_t), offset);
         /// Now, we have written all the metadata:
                 /// [LZ4 SIZE]
                 /// [LZ4 Compressed metadata]
                 /// [DENTRY]
-        dentry_start_ = data_compressed.size(); // so save_dentry_unblocked() knows where to continue
+
         save_dentry_unblocked();
 
         // relink root
@@ -202,7 +218,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
     }
 }
 
-uint64_t cfs::inode_t::inode_copy_on_write(const uint64_t cow_index, const std::vector<uint8_t> &content)
+uint64_t cfs::inode_t::relink_on_dentry(const uint64_t cow_index, const std::vector<uint8_t> &content)
 {
     copy_on_write(); // relink
 
@@ -240,8 +256,7 @@ uint64_t cfs::inode_t::inode_copy_on_write(const uint64_t cow_index, const std::
         dentry_map_reversed_search_map_.emplace(new_block, name);
 
         // write to dentry
-        dentry_start_ = 0;
-        referenced_inode_->resize(0); // clear old data
+        referenced_inode_->resize(dentry_start_); // clear old data
         save_dentry_unblocked(); // write
 
         // return the new block to child

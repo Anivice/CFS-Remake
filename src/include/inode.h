@@ -29,8 +29,8 @@ namespace cfs
         uint64_t dentry_start_ = 0; /// dentry info offset, for root metadata jump
 
         std::mutex operation_mutex_;
-        tsl::hopscotch_map<std::string, uint64_t> dentry_map_; /// name -> inode dentry
-        tsl::hopscotch_map<uint64_t, std::string> dentry_map_reversed_search_map_; /// reversed search map, inode -> name
+        /* tsl::hopscotch_map */ std::unordered_map <std::string, uint64_t> dentry_map_; /// name -> inode dentry
+        /* tsl::hopscotch_map */ std::unordered_map <uint64_t, std::string> dentry_map_reversed_search_map_; /// reversed search map, inode -> name
 
         [[nodiscard]] mode_t inode_type() const { return referenced_inode_->get_stat().st_mode & S_IFMT; } // POSIX types
 
@@ -62,7 +62,7 @@ namespace cfs
         /// @param cow_index Current child inode index
         /// @param content Inode content for CoW. Parent cannot lock inode when it's in use so
         /// @return New inode index, you should immediately switch your reference if inode index changes
-        uint64_t inode_copy_on_write(uint64_t cow_index, const std::vector<uint8_t> & content);
+        uint64_t relink_on_dentry(uint64_t cow_index, const std::vector<uint8_t> & content);
 
     public:
         NO_COPY_OBJ(inode_t)

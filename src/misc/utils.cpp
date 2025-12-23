@@ -141,21 +141,22 @@ std::vector<uint8_t> cfs::utils::arithmetic::compress(const std::vector<uint8_t>
     std::vector < uint8_t > ret;
     const int maxDst = LZ4_compressBound(data.size());   // worst-case bound
     ret.resize(maxDst);
+    const uint64_t data_size = data.size();
 
     const int cSize = LZ4_compress_default((char*)data.data(), (char*)ret.data(), data.size(), maxDst);  // returns 0 on failure
     if (cSize == 0) { return { }; }
-    ret.resize(cSize + sizeof(int));
-    *(int*)(ret.data() + cSize) = cSize;
+    ret.resize(cSize + sizeof(uint64_t));
+    *(uint64_t*)(ret.data() + cSize) = data_size;
     return ret;
 }
 
-std::vector<uint8_t> cfs::utils::arithmetic::decompress(const std::vector<uint8_t> &data) noexcept
+std::vector<uint8_t> cfs::utils::arithmetic::decompress(const std::vector<uint8_t> & data) noexcept
 {
     std::vector < uint8_t > result;
-    const int * cSize = (int*)(data.data() + data.size() - sizeof(int));
+    const uint64_t * cSize = (uint64_t*)(data.data() + data.size() - sizeof(uint64_t));
     result.resize(*cSize);
     const int dSize = LZ4_decompress_safe((char*)data.data(), (char*)result.data(),
-                                          data.size() - sizeof(int), *cSize);
+                                          data.size() - sizeof(uint64_t), *cSize);
     if (dSize < 0) return { };   // malformed input or dst too small
     return result;
 }
