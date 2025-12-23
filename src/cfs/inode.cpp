@@ -34,7 +34,7 @@ void cfs::inode_t::save_dentry_unblocked()
 void cfs::inode_t::read_dentry_unblocked()
 {
     std::vector<uint8_t> buffer_(size(), 0);
-    read((char*)buffer_.data(), buffer_.size(), 0);
+    referenced_inode_->read((char*)buffer_.data(), buffer_.size(), 0);
     dentry_map_.clear();
     dentry_map_reversed_search_map_.clear();
     if (buffer_.size() < sizeof(uint64_t)) {

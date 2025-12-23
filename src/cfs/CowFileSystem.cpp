@@ -292,6 +292,58 @@ namespace cfs
         ilog("Total ", bad_blocks.size(), " bad blocks\n");
     }
 
+    void CowFileSystem::ls(const std::vector<std::string> &vec)
+    {
+        auto ls = [&](std::string path)
+        {
+            cfs::dentry_t::dentry_pairs_t list;
+            {
+                path = path_calculator(path);
+                const auto vpath = path_to_vector(path);
+                const auto [child, parent] = deference_inode_from_path(vpath);
+                if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR)
+                {
+                    auto dentry = dynamic_cast<dentry_t*>(child.get());
+                    list = dentry->ls();
+                }
+                else {
+                    elog("Inode is not a dentry\n");
+                    return;
+                }
+            }
+
+            for (const auto & name : list | std::views::keys) {
+                const auto child_path = path_calculator(path + "/" + name);
+                const auto child_vpath = path_to_vector(child_path);
+                const auto [child, parent] = deference_inode_from_path(child_vpath);
+                const auto stat = child->get_stat();
+                if ((stat.st_mode & S_IFMT) == S_IFDIR) {
+                    std::cout << name << "/" << "\t" << stat.st_size << std::endl;
+                } else {
+                    std::cout << name << "\t" << stat.st_size << std::endl;
+                }
+            }
+        };
+
+        if (vec.size() == 1) // no args
+        {
+            ls(cfs_pwd_);
+        }
+        else // has args
+        {
+            std::vector<std::string> vpaths = vec;
+            vpaths.erase(vpaths.begin());
+            std::ranges::for_each(vpaths, [&](std::string path)
+            {
+                if (!path.empty() && path.front() != '/') {
+                    path = cfs_pwd_ + "/" + path;
+                }
+
+                ls(path);
+            });
+        }
+    }
+
     std::vector<std::string> CowFileSystem::path_to_vector(const std::string &path) noexcept
     {
         std::vector<std::string> result;
@@ -301,10 +353,12 @@ namespace cfs
         while (!ss.eof())
         {
             ss >> c;
-            if (c == '/' && !buf.empty())
+            if (c == '/')
             {
-                result.push_back(buf);
-                buf.clear();
+                if (!buf.empty()) {
+                    result.push_back(buf);
+                    buf.clear();
+                }
                 continue;
             }
 
@@ -376,103 +430,447 @@ namespace cfs
                 .child = std::make_shared<inode_t>(index,
                     &cfs_basic_filesystem_, &block_manager_, &journaling_, &block_attribute_,
                     (dentry_t*)parent),
-                .parent = std::move(*(dentries.end() - 2))
+                .parents = std::move(dentries)
             };
         }
 
-        return { };
+        return {
+            .child = std::make_shared<dentry_t>(
+                cfs_basic_filesystem_.cfs_header_block.get_info<root_inode_pointer>(),
+                &cfs_basic_filesystem_,
+                &block_manager_,
+                &journaling_,
+                &block_attribute_,
+                nullptr),
+            .parents = { }
+        };
     }
 
-    int CowFileSystem::do_getattr(const std::string &path, struct stat *stbuf) noexcept
+#define GENERAL_TRY() try {
+#define GENERAL_CATCH(XX)                       \
+    } catch (no_such_file_or_directory &) {     \
+        return -ENOENT;                         \
+    } catch (no_more_free_spaces &) {           \
+        return -ENOSPC;                         \
+    } XX catch (std::exception &e) {            \
+        elog(e.what(), "\n");                   \
+        return -EIO;                            \
+    }
+
+    int CowFileSystem::do_getattr(const std::string & path, struct stat *stbuf) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent] = deference_inode_from_path(vpath);
+            *stbuf = child->get_stat();
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_readdir(const std::string &path, std::vector<std::string> &entries) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
+                auto * dentry = dynamic_cast<dentry_t*>(child.get());
+                const auto list = dentry->ls() | std::views::keys;
+                entries.reserve(list.size());
+                std::ranges::for_each(list, [&](const std::string & p){ entries.push_back(p); });
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_mkdir(const std::string &path, mode_t mode) noexcept
+    int CowFileSystem::do_mkdir(const std::string & path, mode_t mode) noexcept
     {
+        GENERAL_TRY() {
+            auto vpath = path_to_vector(path);
+            if (vpath.empty()) {
+                return -EINVAL; // WTF, mkdir without a fucking name?
+            }
+
+            const auto target = vpath.back();
+            vpath.pop_back();
+
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
+                auto * dentry = dynamic_cast<dentry_t*>(child.get());
+                auto new_dentry = dentry->make_inode<dentry_t>(target);
+                new_dentry.chmod(mode | S_IFDIR);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_chown(const std::string &path, uid_t uid, gid_t gid) noexcept
+    int CowFileSystem::do_chown(const std::string &path, const uid_t uid, const gid_t gid) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            child->chown(uid, gid);
+            child->set_ctime(utils::get_timespec());
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_chmod(const std::string &path, mode_t mode) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            child->chmod(mode);
+            child->set_ctime(utils::get_timespec());
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_create(const std::string &path, mode_t mode) noexcept
+    int CowFileSystem::do_create(const std::string &path, const mode_t mode) noexcept
     {
+        GENERAL_TRY() {
+            auto vpath = path_to_vector(path);
+            if (vpath.empty()) {
+                return -EINVAL;
+            }
+
+            const auto target = vpath.back();
+            vpath.pop_back();
+
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
+                auto * dentry = dynamic_cast<dentry_t*>(child.get());
+                auto inode = dentry->make_inode<inode_t>(target);
+                inode.chmod(mode | S_IFREG);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_flush() noexcept {
+    int CowFileSystem::do_flush() noexcept
+    {
+        GENERAL_TRY() {
+            cfs_basic_filesystem_.sync();
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_access(const std::string &path, int mode) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            if (mode == F_OK)
+            {
+                return 0;
+            }
+
+            // permission check:
+            mode <<= 6;
+            mode &= 0x01C0;
+            auto st_mode = child->get_stat().st_mode;
+            if (block_attribute_.get<block_status>(child->get_stat().st_ino) != BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                st_mode &= 0500; // strip write permission
+            }
+            return -!(mode & st_mode);
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_open(const std::string &path) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_read(const std::string &path, char *buffer, size_t size, off_t offset) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            return child->read(buffer, size, offset);
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_write(const std::string &path, const std::string &buffer, size_t size, off_t offset) noexcept
+    int CowFileSystem::do_write(const std::string &path, const char * buffer, size_t size, off_t offset) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            child->set_mtime(utils::get_timespec());
+            return child->write(buffer, size, offset);
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_utimens(const std::string &path, const timespec tv[2]) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            child->set_atime(tv[0]);
+            child->set_ctime(utils::get_timespec());
+            child->set_mtime(tv[1]);
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_unlink(const std::string &path) noexcept
     {
+        GENERAL_TRY() {
+            auto vpath = path_to_vector(path);
+            if (vpath.empty()) {
+                return -EINVAL;
+            }
+
+            const auto target = vpath.back();
+            vpath.pop_back();
+
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
+                auto * dentry = dynamic_cast<dentry_t*>(child.get());
+                dentry->unlink(target);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_rmdir(const std::string &path) noexcept
     {
+        GENERAL_TRY() {
+            auto vpath = path_to_vector(path);
+            if (vpath.empty()) {
+                return -EINVAL;
+            }
+
+            const auto target = vpath.back();
+            vpath.pop_back();
+
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto * dentry = dynamic_cast<dentry_t*>(child.get());
+                const auto list = dentry->ls();
+                const auto ptr = list.find(target);
+                if (ptr == list.end()) {
+                    return -ENOENT;
+                }
+
+                const auto index = ptr->second;
+
+                // check if dir is empty
+                {
+                    auto tg_inode = make_child_inode<dentry_t>(index, dentry);
+                    if ((tg_inode.get_stat().st_mode & S_IFMT) != S_IFDIR) {
+                        return -ENOTDIR;
+                    }
+
+                    if (!tg_inode.ls().empty()) {
+                        return -ENOTEMPTY;
+                    }
+                }
+
+                // remove when empty
+                dentry->unlink(target);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_truncate(const std::string &path, off_t size) noexcept
+    int CowFileSystem::do_truncate(const std::string &path, const off_t size) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
+            child->set_mtime(utils::get_timespec());
+            child->resize(size);
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_symlink(const std::string &path, const std::string &target) noexcept
+    int CowFileSystem::do_symlink(const std::string & path, const std::string & target_) noexcept
     {
+        GENERAL_TRY() {
+            auto source_vpath = path_to_vector(path);
+            auto target_vpath = path_to_vector(target_);
+            if (source_vpath.empty() || target_vpath.empty()) {
+                return -EINVAL;
+            }
+
+            const auto target = target_vpath.back();
+            target_vpath.pop_back();
+
+            const auto [source, parents]
+                = deference_inode_from_path(source_vpath);
+            const auto [target_parent, target_parent_parents]
+                = deference_inode_from_path(source_vpath);
+
+            auto dentry = dynamic_cast<dentry_t*>(target_parent.get());
+            auto inode = dentry->make_inode<inode_t>(target);
+            inode.chmod(S_IFLNK | 0755);
+            inode.write(path.c_str(), path.size(), 0);
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_snapshot(const std::string &name) noexcept
     {
+        return -ENOSYS;
     }
 
     int CowFileSystem::do_rollback(const std::string &name) noexcept
     {
+        return -ENOSYS;
     }
 
     int CowFileSystem::do_rename(const std::string &path, const std::string &new_path) noexcept
     {
+        GENERAL_TRY() {
+            auto source_vpath = path_to_vector(path);
+            auto target_vpath = path_to_vector(new_path);
+            if (source_vpath.empty() || target_vpath.empty()) {
+                return -EINVAL;
+            }
+
+            const auto source = source_vpath.back();
+            source_vpath.pop_back();
+            const auto target = target_vpath.back();
+            target_vpath.pop_back();
+
+            const auto [source_parent, source_parent_parents]
+                = deference_inode_from_path(source_vpath);
+            const auto [target_parent, target_parent_parents]
+                = deference_inode_from_path(source_vpath);
+
+            auto source_parent_inode = dynamic_cast<dentry_t*>(source_parent.get());
+            auto target_parent_inode = dynamic_cast<dentry_t*>(target_parent.get());
+
+            const auto source_index = source_parent_inode->erase_entry(source);
+            target_parent_inode->add_entry(target, source_index);
+
+            return 0;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_fallocate(const std::string &path, int mode, off_t offset, off_t length) noexcept
+    int CowFileSystem::do_fallocate(const std::string & path, const int mode, const off_t offset, const off_t length) noexcept
     {
+        GENERAL_TRY() {
+            auto vpath = path_to_vector(path);
+            if (vpath.empty()) {
+                return -EINVAL;
+            }
+
+            const auto target = vpath.back();
+            vpath.pop_back();
+
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
+                auto * dentry = dynamic_cast<dentry_t*>(child.get());
+                auto inode = dentry->make_inode<inode_t>(target);
+                inode.chmod(mode | S_IFREG);
+                inode.resize(offset + length);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_readlink(const std::string &path, char *buffer, size_t size) noexcept
+    int CowFileSystem::do_readlink(const std::string &path, char * buffer, const size_t size) noexcept
     {
+        GENERAL_TRY() {
+            const auto vpath = path_to_vector(path);
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFLNK) {
+                const auto len = child->read(buffer, size, 0);
+                buffer[std::min(len, size)] = '\0';
+                return 0;
+            }
+
+            return -EIO;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_mknod(const std::string &path, mode_t mode, dev_t device) noexcept
+    int CowFileSystem::do_mknod(const std::string &path, const mode_t mode, const dev_t device) noexcept
     {
+        GENERAL_TRY() {
+            auto vpath = path_to_vector(path);
+            if (vpath.empty()) {
+                return -EINVAL;
+            }
+
+            const auto target = vpath.back();
+            vpath.pop_back();
+
+            const auto [child, parents] = deference_inode_from_path(vpath);
+            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
+                auto * dentry = dynamic_cast<dentry_t*>(child.get());
+                auto inode = dentry->make_inode<inode_t>(target);
+                inode.chmod(mode);
+                inode.chdev(device);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
     struct statvfs CowFileSystem::do_fstat() noexcept
     {
-        struct statvfs status { };
+        const auto free = cfs_basic_filesystem_.cfs_header_block.get_info<allocated_non_cow_blocks>();
+        const struct statvfs status {
+            .f_bsize = cfs_basic_filesystem_.static_info_.block_size,
+            .f_frsize = cfs_basic_filesystem_.static_info_.block_size,
+            .f_blocks = cfs_basic_filesystem_.static_info_.blocks,
+            .f_bfree = free,
+            .f_bavail = free,
+            .f_files = 0,
+            .f_ffree = 0,
+            .f_favail = 0,
+            .f_fsid = 0,
+            .f_flag = 0,
+            .f_namemax = 255,
+            .f_type = 0x65735546, // FUSE
+        };
+        return status;
     }
 
     bool CowFileSystem::command_main_entry_point(const std::vector<std::string> &vec)
@@ -491,6 +889,9 @@ namespace cfs
         }
         else if (vec.front() == "version") {
             version();
+        }
+        else if (vec.front() == "ls") {
+            ls(vec);
         }
         else if (vec.front() == "debug" && vec.size() >= 2)
         {

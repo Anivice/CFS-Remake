@@ -14,7 +14,7 @@ namespace cfs
 {
     class CowFileSystem {
     private:
-        std::string cfs_pwd_;
+        std::string cfs_pwd_ = "/";
 
         filesystem cfs_basic_filesystem_;
         cfs_journaling_t journaling_;
@@ -43,6 +43,7 @@ namespace cfs
         void debug_cat_journal();
         void debug_cat_attribute(const std::vector<std::string> &vec);
         void debug_check_hash5();
+        void ls(const std::vector<std::string> &vec);
 
         /// turn path into vector
         std::vector<std::string> path_to_vector(const std::string & path) noexcept;
@@ -55,7 +56,7 @@ namespace cfs
 
         using deferenced_pairs_t = struct {
             std::shared_ptr < inode_t > child;
-            std::shared_ptr < dentry_t > parent;
+            std::vector<std::shared_ptr < dentry_t > > parents;
         };
 
         using vpath_t = std::vector<std::string>;
@@ -142,7 +143,7 @@ namespace cfs
         /// @param size
         /// @param offset
         /// @return 0 means good, negative + errno means error
-        int do_write(const std::string &  path, const std::string & buffer, size_t size, off_t offset) noexcept;
+        int do_write(const std::string &  path, const char * buffer, size_t size, off_t offset) noexcept;
 
         /// change time
         /// @param path Full path

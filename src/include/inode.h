@@ -110,6 +110,9 @@ namespace cfs
         void set_ctime(timespec st_ctim);   // change st_ctim
         void set_mtime(timespec st_mtim);   // change st_mtim
 
+        /// get struct stat
+        [[nodiscard]] struct stat get_stat() const { return this->referenced_inode_->get_stat(); }
+
         /// Return inode content size
         uint64_t size() const { return referenced_inode_->cfs_inode_attribute->st_size; }
 
@@ -178,6 +181,28 @@ namespace cfs
         /// @param name Inode name
         void unlink(const std::string & name);
 
+        uint64_t erase_entry(const std::string & name)
+        {
+            std::lock_guard lock(operation_mutex_);
+            const auto ptr = dentry_map_.find(name);
+            cfs_assert_simple (ptr != dentry_map_.end());
+            const auto inode = ptr->second;
+            dentry_map_.erase(ptr);
+            dentry_map_reversed_search_map_.erase(inode);
+            save_dentry_unblocked();
+            return inode;
+        }
+
+        void add_entry(const std::string & name, const uint64_t index)
+        {
+            std::lock_guard lock(operation_mutex_);
+            const auto ptr = dentry_map_.find(name);
+            cfs_assert_simple (ptr == dentry_map_.end());
+            dentry_map_.emplace(name, index);
+            dentry_map_reversed_search_map_.emplace(index, name);
+            save_dentry_unblocked();
+        }
+
         /// create an inode under current dentry
         /// @param name Inode dentry name
         /// @return New inode
@@ -185,6 +210,9 @@ namespace cfs
         InodeType make_inode(const std::string & name)
         {
             std::lock_guard<std::mutex> lock(operation_mutex_);
+            const auto ptr = dentry_map_.find(name);
+            cfs_assert_simple (ptr == dentry_map_.end());
+            copy_on_write(); // relink
             const auto new_index = inode_construct_info_.block_manager->allocate();
             // clear inode data
             {
@@ -255,6 +283,15 @@ namespace cfs
                 }
                 std::memcpy(new_lock.data(), &inode_stat, sizeof(inode_stat)); // new inode struct stat
             }
+
+            this->dentry_map_.emplace(name, new_index);
+            this->dentry_map_reversed_search_map_.emplace(new_index, name);
+            save_dentry_unblocked();
+
+            return InodeType(new_index,
+                    inode_construct_info_.parent_fs_governor, inode_construct_info_.block_manager,
+                    inode_construct_info_.journal, inode_construct_info_.block_attribute,
+                    this);
         }
     };
 }
