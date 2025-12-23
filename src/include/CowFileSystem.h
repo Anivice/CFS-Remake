@@ -33,6 +33,15 @@ namespace cfs
         /// wrapper for ls_pwd
         std::vector <std::string> ls_under_pwd_of_cfs(const std::string & /* type is always cfs */);
 
+        void help();
+        void help_at(const std::vector<std::string> &vec);
+        void version();
+
+        void debug_cat_ditmap();
+        void debug_cat_journal();
+        void debug_cat_attribute(const std::vector<std::string> &vec);
+        void debug_check_hash5();
+
     public:
         /// wrapper for entry point
         bool command_main_entry_point(const std::vector<std::string> & vec);

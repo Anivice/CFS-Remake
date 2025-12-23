@@ -148,6 +148,143 @@ namespace cfs
         return {};
     }
 
+    void CowFileSystem::help()
+    {
+        std::cout << cmdTpTree::command_template_tree.get_help();
+    }
+
+    void CowFileSystem::help_at(const std::vector<std::string> &vec)
+    {
+        try {
+            const std::vector help_path(vec.begin() + 1, vec.end());
+            std::ranges::for_each(help_path, [](const auto & v) { std::cout << v << " "; });
+            std::cout << ": " << cmdTpTree::command_template_tree.get_help(help_path) << std::endl;
+        } catch (std::exception & e) {
+            elog(e.what(), "\n");
+        }
+    }
+
+    void CowFileSystem::version()
+    {
+        std::cout.write(reinterpret_cast<const char *>(version_text), version_text_len);
+        std::cout << std::endl;
+    }
+
+    void CowFileSystem::debug_cat_ditmap() {
+        ilog("Bitmap for the whole filesystem:\n");
+        const auto col = utils::get_screen_row_col().second;
+        const auto fs_bitmap_size =
+            cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
+        for (uint64_t i = 0; i < fs_bitmap_size; i++)
+        {
+            if (i != 0 && i % col == 0) {
+                std::cout << "\n";
+            }
+
+            auto show_bit = [](const uint32_t attr) {
+                switch (attr)
+                {
+                    case IndexNode:
+                        std::cout << color::color(0,0,5) << "I" << color::no_color();
+                        break;
+                    case PointerBlock:
+                        std::cout << color::color(0,5,0) << "P" << color::no_color();
+                        break;
+                    case StorageBlock:
+                        std::cout << color::color(5,5,0) << "S" << color::no_color();
+                        break;
+                    default:
+                        std::cout << color::color(5,5,5) << "x" << color::no_color();
+                }
+            };
+
+            if (mirrored_bitmap_.get_bit(i))
+            {
+                switch (const auto attr = block_attribute_.get<block_type>(i))
+                {
+                    case CowRedundancy:
+                        std::cout << color::bg_color(1,1,1);
+                        show_bit(block_attribute_.get<block_type_cow>(i));
+                        break;
+                    default:
+                        show_bit(attr);
+                }
+            } else {
+                std::cout << ".";
+            }
+        }
+
+        if (fs_bitmap_size % col != 0) {
+            std::cout << "\n";
+        }
+    }
+
+    void CowFileSystem::debug_cat_journal()
+    {
+        const auto journal = this->journaling_.dump_actions();
+        std::ranges::for_each(journal, [](const cfs_action_t & action) {
+            std::cout << translate_action_into_literal(action) << std::endl;
+        });
+    }
+
+    void CowFileSystem::debug_cat_attribute(const std::vector<std::string> &vec)
+    {
+        const auto & loc = vec[3];
+        const auto pos = std::strtol(loc.c_str(), nullptr, 10);
+        const auto attr = block_attribute_.get(pos);
+        if (!mirrored_bitmap_.get_bit(pos)) wlog("Not allocated!\n");
+        std::cout << print_attribute(*(uint32_t*)&attr) << std::endl;
+    }
+
+    void CowFileSystem::debug_check_hash5()
+    {
+        auto putc = [](const int status)
+        {
+            switch (status) {
+                case 0: // not allocated
+                    std::cout << ".";
+                    break;
+                case 1: // good
+                    std::cout << color::color(0,5,0) << "*" << color::no_color();
+                    break;
+                case 2: // bad
+                    std::cout << color::color(5,0,0) << "B" << color::no_color();
+                    break;
+                default: std::cout << "x";
+            }
+        };
+
+        const auto len = this->cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
+        std::vector<uint64_t> bad_blocks;
+        for (uint64_t i = 0; i < len; i++)
+        {
+            if (mirrored_bitmap_.get_bit(i))
+            {
+                auto pg = cfs_basic_filesystem_.lock(i + cfs_basic_filesystem_.static_info_.data_table_start);
+                const uint8_t checksum = cfs::utils::arithmetic::hash5((uint8_t*)pg.data(), pg.size());
+                const auto comp = block_attribute_.get<block_checksum>(i);
+                if (!block_attribute_.get<newly_allocated_thus_no_cow>(i) && comp != checksum) {
+                    putc(2);
+                } else {
+                    putc(1);
+                }
+            }
+            else
+            {
+                putc(0);
+            }
+        }
+
+        if (len % utils::get_screen_row_col().second != 0) {
+            std::cout << "\n";
+        }
+
+        std::ranges::for_each(bad_blocks, [](const uint64_t block) {
+            elog(std::dec, "Checksum mismatch at block index ", block, "\n");
+        });
+        ilog("Total ", bad_blocks.size(), " bad blocks\n");
+    }
+
     bool CowFileSystem::command_main_entry_point(const std::vector<std::string> &vec)
     {
         if (vec.empty()) return true;
@@ -157,112 +294,35 @@ namespace cfs
         }
 
         if (vec.front() == "help") {
-            std::cout << cmdTpTree::command_template_tree.get_help();
+            help();
         }
         else if (vec.front() == "help_at") {
-            try {
-                const std::vector help_path(vec.begin() + 1, vec.end());
-                std::ranges::for_each(help_path, [](const auto & v) { std::cout << v << " "; });
-                std::cout << ": " << cmdTpTree::command_template_tree.get_help(help_path) << std::endl;
-            } catch (std::exception & e) {
-                elog(e.what(), "\n");
-            }
+            help_at(vec);
         }
         else if (vec.front() == "version") {
-            std::cout.write(reinterpret_cast<const char *>(version_text), version_text_len);
-            std::cout << std::endl;
+            version();
         }
         else if (vec.front() == "debug" && vec.size() >= 2)
         {
             if (vec[1] == "cat" && vec.size() >= 3)
             {
-                if (vec[2] == "bitmap")
-                {
-                    ilog("Bitmap for the whole filesystem:\n");
-                    const auto col = utils::get_screen_row_col().second;
-                    const auto fs_bitmap_size =
-                        cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
-                    for (uint64_t i = 0; i < fs_bitmap_size; i++)
-                    {
-                        if (i != 0 && i % col == 0) {
-                            std::cout << "\n";
-                        }
-
-                        auto show_bit = [](const uint32_t attr) {
-                            switch (attr)
-                            {
-                                case IndexNode:
-                                    std::cout << color::color(0,0,5) << "I" << color::no_color();
-                                    break;
-                                case PointerBlock:
-                                    std::cout << color::color(0,5,0) << "P" << color::no_color();
-                                    break;
-                                case StorageBlock:
-                                    std::cout << color::color(5,5,0) << "S" << color::no_color();
-                                    break;
-                                default:
-                                    std::cout << color::color(5,5,5) << "x" << color::no_color();
-                            }
-                        };
-
-                        if (mirrored_bitmap_.get_bit(i))
-                        {
-                            switch (const auto attr = block_attribute_.get<block_type>(i))
-                            {
-                                case CowRedundancy:
-                                    std::cout << color::bg_color(1,1,1);
-                                    show_bit(block_attribute_.get<block_type_cow>(i));
-                                    break;
-                                default:
-                                    show_bit(attr);
-                            }
-                        } else {
-                            std::cout << ".";
-                        }
-                    }
-
-                    if (fs_bitmap_size % col != 0) {
-                        std::cout << "\n";
-                    }
+                if (vec[2] == "bitmap") {
+                    debug_cat_ditmap();
                 }
-                else if (vec[2] == "journal")
-                {
-                    const auto journal = this->journaling_.dump_actions();
-                    std::ranges::for_each(journal, [](const cfs_action_t & action) {
-                        std::cout << translate_action_into_literal(action) << std::endl;
-                    });
+                else if (vec[2] == "journal") {
+                    debug_cat_journal();
                 }
-                else if (vec[2] == "attribute" && vec.size() == 4)
-                {
-                    const auto loc = vec[3];
-                    const auto pos = std::strtol(loc.c_str(), nullptr, 10);
-                    const auto attr = block_attribute_.get(pos);
-                    if (!mirrored_bitmap_.get_bit(pos)) wlog("Not allocated!\n");
-                    std::cout << print_attribute(*(uint32_t*)&attr) << std::endl;
-                }
-                else {
+                else if (vec[2] == "attribute" && vec.size() == 4) {
+                    debug_cat_attribute(vec);
+                } else {
                     elog("Failed to parse command\n");
                 }
             }
             else if (vec[1] == "check" && vec.size() == 3)
             {
-                if (vec[2] == "block_hash5")
-                {
-                    const auto len = this->cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
-                    for (uint64_t i = 0; i < len; i++)
-                    {
-                        if (mirrored_bitmap_.get_bit(i))
-                        {
-                            auto pg = cfs_basic_filesystem_.lock(i + cfs_basic_filesystem_.static_info_.data_table_start);
-                            const uint8_t checksum = cfs::utils::arithmetic::hash5((uint8_t*)pg.data(), pg.size());
-                            const auto comp = block_attribute_.get<block_checksum>(i);
-                            if (!block_attribute_.get<newly_allocated_thus_no_cow>(i) && comp != checksum) {
-                                elog(std::dec, "Checksum mismatch at block index ", i, ", attribute says it's ", (uint8_t)comp, ", but we have ", checksum, "\n");
-                            }
-                        }
-                    }
-                }
-                else {
+                if (vec[2] == "hash5") {
+                    debug_check_hash5();
+                } else {
                     elog("Failed to parse command\n");
                 }
             }
