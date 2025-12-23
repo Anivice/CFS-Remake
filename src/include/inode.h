@@ -59,10 +59,12 @@ namespace cfs
         /// a concept called "per-snapshot bitmap" was firstly introduced.
         /// More info: Dave Hitz, James Lau, and Michael Malcolm: File System Design for an NFS File Server Appliance, 1994
         /// (https://www.netapp.com/media/23880-file-system-design.pdf)
+        void root_cow();
+
         /// @param cow_index Current child inode index
         /// @param content Inode content for CoW. Parent cannot lock inode when it's in use so
         /// @return New inode index, you should immediately switch your reference if inode index changes
-        uint64_t relink_on_dentry(uint64_t cow_index, const std::vector<uint8_t> & content);
+        uint64_t copy_on_write_invoked_from_child(uint64_t cow_index, const std::vector<uint8_t> & content);
 
     public:
         NO_COPY_OBJ(inode_t)

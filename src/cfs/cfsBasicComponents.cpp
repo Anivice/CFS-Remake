@@ -720,8 +720,8 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, uint64_t size, const uint64
 {
     std::lock_guard<std::mutex> lock_guard_(mutex_);
     if (this->cfs_inode_attribute->st_size == 0) return 0; // skip read if size is 0
-    if (this->cfs_inode_attribute->st_size > offset) return 0; // skip read if offset is larger than inode size
-    if (this->cfs_inode_attribute->st_size > (offset + size)) {
+    if (this->cfs_inode_attribute->st_size < offset) return 0; // skip read if offset is larger than inode size
+    if (this->cfs_inode_attribute->st_size < (offset + size)) {
         size = this->cfs_inode_attribute->st_size - offset; // resize when short read
     }
 

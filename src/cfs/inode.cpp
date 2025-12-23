@@ -39,11 +39,11 @@ void cfs::inode_t::read_dentry_unblocked()
         return;
     }
 
-    referenced_inode_->read((char*)dentry_start_, sizeof(dentry_start_), 0);
+    referenced_inode_->read((char*)&dentry_start_, sizeof(dentry_start_), 0);
     dentry_map_.clear();
     dentry_map_reversed_search_map_.clear();
     std::vector<uint8_t> buffer_(size() - dentry_start_, 0);
-    referenced_inode_->read((char*)buffer_.data(), buffer_.size(), dentry_start_);
+    const auto rSize = referenced_inode_->read((char*)buffer_.data(), buffer_.size(), dentry_start_);
 
     bool found = false;
     const uint64_t * magic = (uint64_t*)buffer_.data();
@@ -109,7 +109,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
     const std::vector<uint8_t> my_data = dump_inode_raw();
     if (parent_inode_ != nullptr)
     {
-        const auto new_inode_num_ = parent_inode_->relink_on_dentry(current_referenced_inode_, my_data); // upload
+        const auto new_inode_num_ = parent_inode_->copy_on_write_invoked_from_child(current_referenced_inode_, my_data); // upload
         if (new_inode_num_ != current_referenced_inode_) // I got referenced
         {
             const auto old_ = current_referenced_inode_;
@@ -119,109 +119,114 @@ void cfs::inode_t::copy_on_write() // CoW entry
                                                                       inode_construct_info_.block_manager,
                                                                       inode_construct_info_.journal,
                                                                       inode_construct_info_.block_attribute); // relocate reference
+            referenced_inode_->cfs_inode_attribute->st_ino = current_referenced_inode_;
             inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
             inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
         }
     }
     else
     {
-        std::vector<uint8_t> data_;
-        // create a new block
-        const auto new_inode_num_ = inode_construct_info_.block_manager->allocate();
-        // set attributes
-        inode_construct_info_.block_attribute->clear(new_inode_num_, {
-                                                         .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-                                                         .block_type = INDEX_NODE_BLOCK,
-                                                         .block_type_cow = 0,
-                                                         .allocation_oom_scan_per_refresh_count = 0,
-                                                         .newly_allocated_thus_no_cow = 0,
-                                                         .index_node_referencing_number = 1,
-                                                         .block_checksum = 0,
-                                                     });
-
-        /// dump my own data to new inode
-        {
-            const auto new_lock = inode_construct_info_.parent_fs_governor->
-                    lock(new_inode_num_ + static_info_->data_table_start);
-            std::memcpy(new_lock.data(), referenced_inode_->inode_effective_lock_.data(), static_info_->block_size);
-        }
-
-        const auto old_ = current_referenced_inode_;
-        current_referenced_inode_ = new_inode_num_; // get new inode
-        referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
-                                                                  inode_construct_info_.parent_fs_governor,
-                                                                  inode_construct_info_.block_manager,
-                                                                  inode_construct_info_.journal,
-                                                                  inode_construct_info_.block_attribute); // relocate
-
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////
-        /////////////  _    _______ _____ _____ _____  ______ _____   _____ _   _ ______ _____    //////////////
-        ///////////// | |  | | ___ \_   _|_   _|  ___| |  ___/  ___| |_   _| \ | ||  ___|  _  |   //////////////
-        ///////////// | |  | | |_/ / | |   | | | |__   | |_  \ `--.    | | |  \| || |_  | | | |   //////////////
-        ///////////// | |/\| |    /  | |   | | |  __|  |  _|  `--. \   | | | . ` ||  _| | | | |   //////////////
-        ///////////// \  /\  / |\ \ _| |_  | | | |___  | |   /\__/ /  _| |_| |\  || |   \ \_/ /   //////////////
-        /////////////  \/  \/\_| \_|\___/  \_/ \____/  \_|   \____/   \___/\_| \_/\_|    \___/    //////////////
-        ////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-        // [BITMAP]
-        // [ATTRIBUTES]
-        // [INODE]
-        // [STATIC DATA]
-        // [DENTRY ENTRY]
-
-        const auto bitmap_dump = referenced_inode_->block_manager_->dump_bitmap_data();
-        const auto attribute_dump = referenced_inode_->block_attribute_->dump();
-        std::vector<uint8_t> inode_metadata(referenced_inode_->block_size_);
-        std::memcpy(inode_metadata.data(), referenced_inode_->inode_effective_lock_.data(),
-                    referenced_inode_->inode_effective_lock_.size());
-        /// no static data, yet
-
-        data_.resize(bitmap_dump.size() + attribute_dump.size() + inode_metadata.size()); // we keep this buffer
-        /// so that less malloc is called
-                /// data will be overwritten anyway so
-
-        uint64_t offset = 0;
-        auto write_to_buffer = [&](const std::vector<uint8_t> & buffer) {
-            std::memcpy(data_.data() + offset, buffer.data(), buffer.size());
-            offset += buffer.size();
-        };
-
-        write_to_buffer(bitmap_dump);
-        write_to_buffer(attribute_dump);
-        write_to_buffer(inode_metadata);
-
-        const auto data_compressed = utils::arithmetic::compress(data_);
-        uint64_t size = *(uint64_t*)(data_compressed.data() + data_compressed.size() - sizeof(uint64_t)); // size is at the end of the stream
-        // we need to move it to the front
-
-        dentry_start_ = data_compressed.size() + sizeof(dentry_start_); // so save_dentry_unblocked() knows where to continue
-
-        offset = 0;
-
-        referenced_inode_->resize(0);
-        offset += referenced_inode_->write((char*)&dentry_start_, sizeof(dentry_start_), offset);
-        offset += referenced_inode_->write((char*)&size, sizeof(size), offset);
-        offset += referenced_inode_->write((char*)data_compressed.data(), data_compressed.size() - sizeof(uint64_t), offset);
-        /// Now, we have written all the metadata:
-                /// [LZ4 SIZE]
-                /// [LZ4 Compressed metadata]
-                /// [DENTRY]
-
-        save_dentry_unblocked();
-
-        // relink root
-        inode_construct_info_.parent_fs_governor->cfs_header_block.set_info<root_inode_pointer>(new_inode_num_);
-
-        // change old to redundancy
-        inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
-        inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+        root_cow();
     }
 }
 
-uint64_t cfs::inode_t::relink_on_dentry(const uint64_t cow_index, const std::vector<uint8_t> &content)
+void cfs::inode_t::root_cow()
 {
-    copy_on_write(); // relink
+    std::vector<uint8_t> data_;
+    // create a new block
+    const auto new_inode_num_ = inode_construct_info_.block_manager->allocate();
+    // set attributes
+    inode_construct_info_.block_attribute->clear(new_inode_num_, {
+                                                     .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+                                                     .block_type = INDEX_NODE_BLOCK,
+                                                     .block_type_cow = 0,
+                                                     .allocation_oom_scan_per_refresh_count = 0,
+                                                     .newly_allocated_thus_no_cow = 0,
+                                                     .index_node_referencing_number = 1,
+                                                     .block_checksum = 0,
+                                                 });
 
+    /// dump my own data to new inode
+    {
+        const auto new_lock = inode_construct_info_.parent_fs_governor->
+                lock(new_inode_num_ + static_info_->data_table_start);
+        std::memcpy(new_lock.data(), referenced_inode_->inode_effective_lock_.data(), static_info_->block_size);
+    }
+
+    const auto old_ = current_referenced_inode_;
+    current_referenced_inode_ = new_inode_num_; // get new inode
+    referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
+                                                              inode_construct_info_.parent_fs_governor,
+                                                              inode_construct_info_.block_manager,
+                                                              inode_construct_info_.journal,
+                                                              inode_construct_info_.block_attribute); // relocate
+
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////
+    /////////////  _    _______ _____ _____ _____  ______ _____   _____ _   _ ______ _____    //////////////
+    ///////////// | |  | | ___ \_   _|_   _|  ___| |  ___/  ___| |_   _| \ | ||  ___|  _  |   //////////////
+    ///////////// | |  | | |_/ / | |   | | | |__   | |_  \ `--.    | | |  \| || |_  | | | |   //////////////
+    ///////////// | |/\| |    /  | |   | | |  __|  |  _|  `--. \   | | | . ` ||  _| | | | |   //////////////
+    ///////////// \  /\  / |\ \ _| |_  | | | |___  | |   /\__/ /  _| |_| |\  || |   \ \_/ /   //////////////
+    /////////////  \/  \/\_| \_|\___/  \_/ \____/  \_|   \____/   \___/\_| \_/\_|    \___/    //////////////
+    ////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    // [BITMAP]
+    // [ATTRIBUTES]
+    // [INODE]
+    // [STATIC DATA]
+    // [DENTRY ENTRY]
+
+    const auto bitmap_dump = referenced_inode_->block_manager_->dump_bitmap_data();
+    const auto attribute_dump = referenced_inode_->block_attribute_->dump();
+    std::vector<uint8_t> inode_metadata(referenced_inode_->block_size_);
+    std::memcpy(inode_metadata.data(), referenced_inode_->inode_effective_lock_.data(),
+                referenced_inode_->inode_effective_lock_.size());
+    /// no static data, yet
+
+    data_.resize(bitmap_dump.size() + attribute_dump.size() + inode_metadata.size()); // we keep this buffer
+    /// so that less malloc is called
+    /// data will be overwritten anyway so
+
+    uint64_t offset = 0;
+    auto write_to_buffer = [&](const std::vector<uint8_t> & buffer) {
+        std::memcpy(data_.data() + offset, buffer.data(), buffer.size());
+        offset += buffer.size();
+    };
+
+    write_to_buffer(bitmap_dump);
+    write_to_buffer(attribute_dump);
+    write_to_buffer(inode_metadata);
+
+    const auto data_compressed = utils::arithmetic::compress(data_);
+    uint64_t size = *(uint64_t*)(data_compressed.data() + data_compressed.size() - sizeof(uint64_t)); // size is at the end of the stream
+    // we need to move it to the front
+
+    dentry_start_ = data_compressed.size() + sizeof(dentry_start_); // so save_dentry_unblocked() knows where to continue
+
+    offset = 0;
+
+    referenced_inode_->resize(0);
+    offset += referenced_inode_->write((char*)&dentry_start_, sizeof(uint64_t), offset);
+    offset += referenced_inode_->write((char*)&size, sizeof(uint64_t), offset);
+    offset += referenced_inode_->write((char*)data_compressed.data(), data_compressed.size() - sizeof(uint64_t), offset);
+    /// Now, we have written all the metadata:
+    /// [LZ4 SIZE]
+    /// [LZ4 Compressed metadata]
+    /// [DENTRY]
+
+    save_dentry_unblocked();
+
+    // relink root
+    inode_construct_info_.parent_fs_governor->cfs_header_block.set_info<root_inode_pointer>(new_inode_num_);
+    referenced_inode_->cfs_inode_attribute->st_ino = new_inode_num_;
+
+    // change old to redundancy
+    inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
+    inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+}
+
+uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index, const std::vector<uint8_t> &content)
+{
     /// check if child needs a reference
     if (!inode_construct_info_.block_attribute->get<newly_allocated_thus_no_cow>(cow_index))
     {
