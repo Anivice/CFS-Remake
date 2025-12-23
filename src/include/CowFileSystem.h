@@ -6,13 +6,15 @@
 #include <vector>
 #include <string>
 #include "cfsBasicComponents.h"
+#include <sys/statvfs.h>
+#include <filesystem>
+#include "inode.h"
 
 namespace cfs
 {
     class CowFileSystem {
     private:
         std::string cfs_pwd_;
-        std::string host_pwd_;
 
         filesystem cfs_basic_filesystem_;
         cfs_journaling_t journaling_;
@@ -42,7 +44,193 @@ namespace cfs
         void debug_cat_attribute(const std::vector<std::string> &vec);
         void debug_check_hash5();
 
+        /// turn path into vector
+        std::vector<std::string> path_to_vector(const std::string & path) noexcept;
+
+        /// calculate relative path, if the provided one is a relative path
+        /// and cancel out all the relative jumps like . and ..
+        /// return a clean path
+        /// @return clean path
+        std::string path_calculator(const std::string & path) noexcept;
+
+        using deferenced_pairs_t = struct {
+            std::shared_ptr < inode_t > child;
+            std::shared_ptr < dentry_t > parent;
+        };
+
+        using vpath_t = std::vector<std::string>;
+
+        dentry_t make_root_inode();
+
+        template < class InodeType >
+        requires (std::is_same_v<InodeType, inode_t>
+            || std::is_same_v<InodeType, dentry_t>
+            || std::is_same_v<InodeType, file_t>)
+        InodeType make_child_inode(uint64_t index, inode_t * parent) {
+            return InodeType(index, &cfs_basic_filesystem_, &block_manager_, &journaling_, &block_attribute_, parent);
+        }
+
+        deferenced_pairs_t deference_inode_from_path(vpath_t) noexcept;
+
     public:
+        /// get attributes from an inode by path
+        /// @param path Full path
+        /// @param stbuf stat buffer
+        /// @return 0 means good, negative + errno means error
+        int do_getattr(const std::string & path, struct stat *stbuf) noexcept;
+
+        /// read dir
+        /// @param path Full path
+        /// @param entries path entry, '.' and '..' included
+        /// @return 0 means good, negative + errno means error
+        int do_readdir(const std::string & path, std::vector < std::string > & entries) noexcept;
+
+        /// make a dir
+        /// @param path Full path
+        /// @param mode permissions
+        /// @return 0 means good, negative + errno means error
+        int do_mkdir(const std::string & path, mode_t mode) noexcept;
+
+        /// change ownership info
+        /// @param path Full path
+        /// @param uid UID
+        /// @param gid GID
+        /// @return 0 means good, negative + errno means error
+        int do_chown(const std::string & path, uid_t uid, gid_t gid) noexcept;
+
+        /// change permission info
+        /// @param path Full path
+        /// @param mode permissions
+        /// @return 0 means good, negative + errno means error
+        int do_chmod(const std::string &  path, mode_t mode) noexcept;
+
+        /// Create a non-dir file inode
+        /// @param path Full path
+        /// @param mode permissions
+        /// @return 0 means good, negative + errno means error
+        int do_create(const std::string & path, mode_t mode) noexcept;
+
+        /// sync the filesystem
+        /// @return 0 means good, negative + errno means error
+        int do_flush() noexcept;
+
+        /// release a file. actually it only flush the fs
+        int do_release(const std::string &) noexcept { return do_flush(); }
+
+        /// Check for permissions, see if it can be read
+        /// @param path Full path
+        /// @param mode permissions
+        /// @return 0 means good, negative + errno means error
+        int do_access(const std::string & path, int mode) noexcept;
+
+        /// open a file, but actually it checks for permissions and existences only
+        /// @param path Full path
+        /// @return 0 means good, negative + errno means error
+        int do_open(const std::string & path) noexcept;
+
+        /// read a file
+        /// @param path Full path
+        /// @param buffer
+        /// @param size
+        /// @param offset
+        /// @return 0 means good, negative + errno means error
+        int do_read(const std::string & path, char * buffer, size_t size, off_t offset) noexcept;
+
+        /// write to a file
+        /// @param path Full path
+        /// @param buffer
+        /// @param size
+        /// @param offset
+        /// @return 0 means good, negative + errno means error
+        int do_write(const std::string &  path, const std::string & buffer, size_t size, off_t offset) noexcept;
+
+        /// change time
+        /// @param path Full path
+        /// @param tv [0] => atim, [1] => mtim
+        /// @return 0 means good, negative + errno means error
+        int do_utimens(const std::string & path, const timespec tv[2]) noexcept;
+
+        /// remove a file
+        /// @param path Full path
+        /// @return 0 means good, negative + errno means error
+        int do_unlink(const std::string & path) noexcept;
+
+        /// remove an empty directory
+        /// @param path Full path
+        /// @return 0 means good, negative + errno means error
+        int do_rmdir(const std::string & path) noexcept;
+
+        /// Sync filesystem
+        /// @return 0 means good, negative + errno means error
+        int do_fsync(const std::string &, int) noexcept { return do_flush(); }
+
+        /// wrapped to sync
+        /// @return 0 means good, negative + errno means error
+        int do_releasedir(const std::string & ) noexcept { return do_flush(); }
+
+        /// wrapped to sync
+        /// @return 0 means good, negative + errno means error
+        int do_fsyncdir(const std::string &, int) noexcept { return do_flush(); }
+
+        /// Resize a file
+        /// @param path Full path
+        /// @param size new size
+        /// @return 0 means good, negative + errno means error
+        int do_truncate(const std::string & path, off_t size) noexcept;
+
+        /// Create a symlink from path to target
+        /// @param path Src full path
+        /// @param target target full path
+        /// @return 0 means good, negative + errno means error
+        int do_symlink(const std::string & path, const std::string & target) noexcept;
+
+        /// Create a snapshot by name
+        /// @param name snapshot name
+        /// @return 0 means good, negative + errno means error
+        int do_snapshot(const std::string & name) noexcept;
+
+        /// Rollback to a snapshot state
+        /// @param name snapshot name
+        /// @return 0 means good, negative + errno means error
+        int do_rollback(const std::string & name) noexcept;
+
+        /// Relink an inode
+        /// @param path Old path
+        /// @param new_path New path
+        /// @return 0 means good, negative + errno means error
+        int do_rename(const std::string & path, const std::string & new_path) noexcept;
+
+        /// Create an empty file with defined size
+        /// @param path full path
+        /// @param mode perm
+        /// @param offset offset
+        /// @param length len
+        /// @return 0 means good, negative + errno means error
+        int do_fallocate(const std::string & path, int mode, off_t offset, off_t length) noexcept;
+
+        /// wrapped to do_getattr
+        int do_fgetattr(const std::string & path, struct stat * statbuf) noexcept { return do_getattr(path, statbuf); }
+
+        /// wrapped to do_truncate
+        int do_ftruncate(const std::string & path, off_t length) noexcept { return do_truncate(path, length); }
+
+        /// read link content
+        /// @param path full path
+        /// @param buffer buffer
+        /// @param size buffer size
+        /// @return 0 means good, negative + errno means error
+        int do_readlink(const std::string & path, char * buffer, size_t size) noexcept;
+
+        /// Make a special file
+        /// @param path full path
+        /// @param mode perm
+        /// @param device st_dev
+        /// @return 0 means good, negative + errno means error
+        int do_mknod(const std::string &  path, mode_t mode, dev_t device) noexcept;
+
+        /// get file system state
+        struct statvfs do_fstat() noexcept;
+
         /// wrapper for entry point
         bool command_main_entry_point(const std::vector<std::string> & vec);
 

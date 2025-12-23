@@ -27,7 +27,9 @@
     < pwd       (Show PWD):                                     [NONE]      >,
 
     < copy_to_host      (Copy a file to host filesystem):       [CFSP], [HSP]       >,
+    < copytree_to_host  (Copy a file from host to CFS recursively): [CFSP], [HSP]   >,
     < copy_from_host    (Copy a file from host to CFS):         [HSP],  [CFSP]      >,
+    < copytree_from_host(Copy a file from host to CFS recursively): [HSP],  [CFSP]  >,
     < copy              (Copy a file):                          [CFSP], [CFSP]      >,
     < del               (Delete a file):                        [CFSP]              >,
     < deltree           (Delete recursively):                   [CFSP]              >,

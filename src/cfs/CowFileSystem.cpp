@@ -14,6 +14,7 @@
 #include <sstream>
 #include "colors.h"
 #include <ranges>
+#include "inode.h"
 
 #define print_case(name) case cfs::name: ss << cfs::name##_c_str; break;
 #define print_default(data) default: ss << std::hex << (uint32_t)(data) << std::dec; break;
@@ -141,6 +142,11 @@ static std::string translate_action_into_literal(const cfs::cfs_action_t & actio
     return ss.str();
 }
 
+namespace fs = std::filesystem;
+
+make_simple_error_class(no_such_file_or_directory)
+using namespace cfs::error;
+
 namespace cfs
 {
     std::vector<std::string> CowFileSystem::ls_under_pwd_of_cfs(const std::string &)
@@ -170,7 +176,8 @@ namespace cfs
         std::cout << std::endl;
     }
 
-    void CowFileSystem::debug_cat_ditmap() {
+    void CowFileSystem::debug_cat_ditmap()
+    {
         ilog("Bitmap for the whole filesystem:\n");
         const auto col = utils::get_screen_row_col().second;
         const auto fs_bitmap_size =
@@ -283,6 +290,189 @@ namespace cfs
             elog(std::dec, "Checksum mismatch at block index ", block, "\n");
         });
         ilog("Total ", bad_blocks.size(), " bad blocks\n");
+    }
+
+    std::vector<std::string> CowFileSystem::path_to_vector(const std::string &path) noexcept
+    {
+        std::vector<std::string> result;
+        std::stringstream ss(path);
+        char c;
+        std::string buf;
+        while (!ss.eof())
+        {
+            ss >> c;
+            if (c == '/' && !buf.empty())
+            {
+                result.push_back(buf);
+                buf.clear();
+                continue;
+            }
+
+            buf += c;
+        }
+
+        if (!buf.empty()) {
+            result.push_back(buf);
+        }
+
+        return result;
+    }
+
+    std::string CowFileSystem::path_calculator(const std::string &path) noexcept
+    {
+        if (!path.empty() && path.front() != '/') {
+            const fs::path n = (fs::path(cfs_pwd_) / fs::path(path)).lexically_normal();
+            return n.generic_string();
+        }
+
+        const fs::path p {path};
+        const fs::path n = p.lexically_normal(); // removes ".", ".." lexically
+        return n.generic_string(); // stable '/' separators
+    }
+
+    dentry_t CowFileSystem::make_root_inode() {
+        return make_child_inode<dentry_t>(cfs_basic_filesystem_.cfs_header_block.get_info<root_inode_pointer>(), nullptr);
+    }
+
+    CowFileSystem::deferenced_pairs_t CowFileSystem::deference_inode_from_path(vpath_t path) noexcept
+    {
+        if (!path.empty())
+        {
+            const auto target_name = path.back();
+            path.pop_back();
+
+            std::vector < std::shared_ptr < dentry_t > > dentries;
+            dentries.push_back(
+                std::make_shared<dentry_t>(cfs_basic_filesystem_.cfs_header_block.get_info<root_inode_pointer>(),
+                &cfs_basic_filesystem_, &block_manager_, &journaling_, &block_attribute_, nullptr));
+
+            auto deference = [&](const std::string & name)
+            {
+                dentry_t & parent = *dentries.back();
+                const auto list = parent.ls();
+                const auto ptr = list.find(name);
+                if (ptr == list.end()) {
+                    throw no_such_file_or_directory();
+                }
+
+                const uint64_t index = ptr->second;
+                return std::make_pair<const uint64_t, const void *>(std::move(index), &parent);
+            };
+
+            for (const auto & entry : path)
+            {
+                const auto [index, parent] = deference(entry);
+                dentries.emplace_back(std::make_shared<dentry_t>(
+                    index, // inode index
+                    &cfs_basic_filesystem_, &block_manager_, &journaling_, &block_attribute_,
+                    (dentry_t*)parent));
+            }
+
+            const auto [index, parent] = deference(target_name);
+
+            // now we made a list of reference table
+            // get that last one
+            return {
+                .child = std::make_shared<inode_t>(index,
+                    &cfs_basic_filesystem_, &block_manager_, &journaling_, &block_attribute_,
+                    (dentry_t*)parent),
+                .parent = std::move(*(dentries.end() - 2))
+            };
+        }
+
+        return { };
+    }
+
+    int CowFileSystem::do_getattr(const std::string &path, struct stat *stbuf) noexcept
+    {
+    }
+
+    int CowFileSystem::do_readdir(const std::string &path, std::vector<std::string> &entries) noexcept
+    {
+    }
+
+    int CowFileSystem::do_mkdir(const std::string &path, mode_t mode) noexcept
+    {
+    }
+
+    int CowFileSystem::do_chown(const std::string &path, uid_t uid, gid_t gid) noexcept
+    {
+    }
+
+    int CowFileSystem::do_chmod(const std::string &path, mode_t mode) noexcept
+    {
+    }
+
+    int CowFileSystem::do_create(const std::string &path, mode_t mode) noexcept
+    {
+    }
+
+    int CowFileSystem::do_flush() noexcept {
+    }
+
+    int CowFileSystem::do_access(const std::string &path, int mode) noexcept
+    {
+    }
+
+    int CowFileSystem::do_open(const std::string &path) noexcept
+    {
+    }
+
+    int CowFileSystem::do_read(const std::string &path, char *buffer, size_t size, off_t offset) noexcept
+    {
+    }
+
+    int CowFileSystem::do_write(const std::string &path, const std::string &buffer, size_t size, off_t offset) noexcept
+    {
+    }
+
+    int CowFileSystem::do_utimens(const std::string &path, const timespec tv[2]) noexcept
+    {
+    }
+
+    int CowFileSystem::do_unlink(const std::string &path) noexcept
+    {
+    }
+
+    int CowFileSystem::do_rmdir(const std::string &path) noexcept
+    {
+    }
+
+    int CowFileSystem::do_truncate(const std::string &path, off_t size) noexcept
+    {
+    }
+
+    int CowFileSystem::do_symlink(const std::string &path, const std::string &target) noexcept
+    {
+    }
+
+    int CowFileSystem::do_snapshot(const std::string &name) noexcept
+    {
+    }
+
+    int CowFileSystem::do_rollback(const std::string &name) noexcept
+    {
+    }
+
+    int CowFileSystem::do_rename(const std::string &path, const std::string &new_path) noexcept
+    {
+    }
+
+    int CowFileSystem::do_fallocate(const std::string &path, int mode, off_t offset, off_t length) noexcept
+    {
+    }
+
+    int CowFileSystem::do_readlink(const std::string &path, char *buffer, size_t size) noexcept
+    {
+    }
+
+    int CowFileSystem::do_mknod(const std::string &path, mode_t mode, dev_t device) noexcept
+    {
+    }
+
+    struct statvfs CowFileSystem::do_fstat() noexcept
+    {
+        struct statvfs status { };
     }
 
     bool CowFileSystem::command_main_entry_point(const std::vector<std::string> &vec)

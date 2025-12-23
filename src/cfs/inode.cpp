@@ -114,7 +114,7 @@ void cfs::inode_t::copy_on_write()
 
 uint64_t cfs::inode_t::inode_copy_on_write(const uint64_t cow_index, const std::vector<uint8_t> &content)
 {
-    std::lock_guard lock(dentry_map_mutex_);
+    std::lock_guard lock(operation_mutex_);
     std::vector<uint8_t> data_;
     if (parent_inode_ == nullptr) // Root inode, write inode into metadata dentry section
     {
@@ -281,40 +281,91 @@ cfs::inode_t::inode_t(
 
 void cfs::inode_t::resize(const uint64_t size)
 {
+    std::lock_guard lock(operation_mutex_);
     copy_on_write(); // relink
     referenced_inode_->resize(size);
 }
 
-uint64_t cfs::inode_t::read(char *data, const uint64_t size, const uint64_t offset) const
+uint64_t cfs::inode_t::read(char *data, const uint64_t size, const uint64_t offset)
 {
+    std::lock_guard lock(operation_mutex_);
     return referenced_inode_->read(data, size, offset);
 }
 
 uint64_t cfs::inode_t::write(const char *data, const uint64_t size, const uint64_t offset)
 {
+    std::lock_guard lock(operation_mutex_);
     copy_on_write(); // relink
     return referenced_inode_->write(data, size, offset);
+}
+
+void cfs::inode_t::chdev(const int dev)
+{
+    std::lock_guard lock(operation_mutex_);
+    copy_on_write(); // relink
+    return referenced_inode_->chdev(dev);
+}
+
+void cfs::inode_t::chrdev(const dev_t dev)
+{
+    std::lock_guard lock(operation_mutex_);
+    copy_on_write(); // relink
+    return referenced_inode_->chrdev(dev);
+}
+
+void cfs::inode_t::chmod(const int mode)
+{
+    std::lock_guard lock(operation_mutex_);
+    copy_on_write(); // relink
+    return referenced_inode_->chmod(mode);
+}
+
+void cfs::inode_t::chown(const int uid, const int gid)
+{
+    std::lock_guard lock(operation_mutex_);
+    copy_on_write(); // relink
+    return referenced_inode_->chown(uid, gid);
+}
+
+void cfs::inode_t::set_atime(const timespec st_atim)
+{
+    std::lock_guard lock(operation_mutex_);
+    copy_on_write(); // relink
+    return referenced_inode_->set_atime(st_atim);
+}
+
+void cfs::inode_t::set_ctime(const timespec st_ctim)
+{
+    std::lock_guard lock(operation_mutex_);
+    copy_on_write(); // relink
+    return referenced_inode_->set_atime(st_ctim);
+}
+
+void cfs::inode_t::set_mtime(const timespec st_mtim)
+{
+    std::lock_guard lock(operation_mutex_);
+    copy_on_write(); // relink
+    return referenced_inode_->set_atime(st_mtim);
 }
 
 cfs::dentry_t::dentry_pairs_t cfs::dentry_t::ls()
 {
     // updated from disk and should change sync with the memory so, just read memory
     dentry_pairs_t pairs;
-    std::lock_guard<std::mutex> lock(dentry_map_mutex_);
+    std::lock_guard lock(operation_mutex_);
     for (const auto& [name, pointer] : dentry_map_) {
-        pairs.emplace_back(name, pointer);
+        pairs.emplace(name, pointer);
     }
     return pairs;
 }
 
 void cfs::dentry_t::unlink(const std::string & name)
 {
+    std::lock_guard lock(operation_mutex_);
     copy_on_write(); // relink
-
-    std::lock_guard<std::mutex> lock(dentry_map_mutex_);
     const auto it = dentry_map_.find(name);
     cfs_assert_simple(it != dentry_map_.end());
-    uint64_t inode_pointer = it->second;
+    const uint64_t inode_pointer = it->second;
 
     // remove child from dentry
     dentry_map_.erase(it);

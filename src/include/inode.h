@@ -5,6 +5,9 @@
 #include "tsl/hopscotch_map.h"
 #include "tsl/bhopscotch_map.h"
 
+make_simple_error_class(cannot_initialize_dentry_on_non_dentry_inodes)
+make_simple_error_class(cannot_initialize_non_dentry_on_dentry_inodes)
+
 namespace cfs
 {
     class dentry_t; /// directory entry
@@ -25,7 +28,7 @@ namespace cfs
         const decltype(inode_construct_info_.parent_fs_governor->static_info_) * static_info_; /// static info so I don't have to type
         uint64_t dentry_start_ = 0; /// dentry info offset, for root metadata jump
 
-        std::mutex dentry_map_mutex_; /// dentry map mutex lock
+        std::mutex operation_mutex_;
         tsl::hopscotch_map<std::string, uint64_t> dentry_map_; /// name -> inode dentry
         tsl::hopscotch_map<uint64_t, std::string> dentry_map_reversed_search_map_; /// reversed search map, inode -> name
 
@@ -88,7 +91,7 @@ namespace cfs
         /// @param size read size
         /// @param offset read offset
         /// @return size read
-        virtual uint64_t read(char * data, uint64_t size, uint64_t offset) const;
+        virtual uint64_t read(char * data, uint64_t size, uint64_t offset);
 
         /// write to inode data.
         /// write automatically resizes when offset+size > st_size, but will not shrink.
@@ -98,6 +101,14 @@ namespace cfs
         /// @param offset write offset
         /// @return size written
         virtual uint64_t write(const char * data, uint64_t size, uint64_t offset);
+
+        void chdev(int dev);                // change st_dev
+        void chrdev(dev_t dev);             // change st_rdev
+        void chmod(int mode);               // change st_mode
+        void chown(int uid, int gid);       // change st_uid, st_gid
+        void set_atime(timespec st_atim);   // change st_atim
+        void set_ctime(timespec st_ctim);   // change st_ctim
+        void set_mtime(timespec st_mtim);   // change st_mtim
 
         /// Return inode content size
         uint64_t size() const { return referenced_inode_->cfs_inode_attribute->st_size; }
@@ -125,7 +136,9 @@ namespace cfs
             inode_t * parent_inode)
         : inode_t(index, parent_fs_governor, block_manager, journal, block_attribute, parent_inode)
         {
-            cfs_assert_simple(inode_t::inode_type() != S_IFDIR);
+            if (inode_t::inode_type() == S_IFDIR) {
+                throw error::cannot_initialize_non_dentry_on_dentry_inodes();
+            }
         }
     };
 
@@ -149,12 +162,14 @@ namespace cfs
             inode_t * parent_inode)
         : inode_t(index, parent_fs_governor, block_manager, journal, block_attribute, parent_inode)
         {
-            cfs_assert_simple(inode_t::inode_type() == S_IFDIR);
-            std::lock_guard lock(dentry_map_mutex_);
+            if (inode_type() != S_IFDIR) {
+                throw error::cannot_initialize_dentry_on_non_dentry_inodes();
+            }
+            std::lock_guard lock(operation_mutex_);
             read_dentry_unblocked();
         }
 
-        using dentry_pairs_t = std::vector<std::pair<std::string, uint64_t>>;
+        using dentry_pairs_t = tsl::hopscotch_map<std::string, uint64_t>;
 
         /// List all dentries under current dentry_t
         dentry_pairs_t ls();
@@ -169,7 +184,77 @@ namespace cfs
         template < class InodeType >
         InodeType make_inode(const std::string & name)
         {
-
+            std::lock_guard<std::mutex> lock(operation_mutex_);
+            const auto new_index = inode_construct_info_.block_manager->allocate();
+            // clear inode data
+            {
+                inode_construct_info_.block_attribute->clear(new_index, {
+                    .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+                    .block_type = INDEX_NODE_BLOCK,
+                    .block_type_cow = 0,
+                    .allocation_oom_scan_per_refresh_count = 0,
+                    .newly_allocated_thus_no_cow = 0,
+                    .index_node_referencing_number = 1,
+                    .block_checksum = 0
+                });
+                const auto new_lock = inode_construct_info_.parent_fs_governor->lock(new_index + static_info_->data_table_start);
+                std::memset(new_lock.data(), 0, new_lock.size());
+                const auto now = utils::get_timespec();
+                struct stat inode_stat{};
+                if constexpr (std::is_same_v<InodeType, dentry_t>)
+                {
+                    inode_stat = {
+                        .st_dev = 0,
+                        .st_ino = new_index,
+                        .st_nlink = 1,
+                        .st_mode = S_IFDIR | 0755,
+                        .st_uid = getuid(),
+                        .st_gid = getgid(),
+                        .st_rdev = 0,
+                        .st_size = 0,
+                        .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
+                        .st_blocks = 0,
+                        .st_atim = now,
+                        .st_mtim = now,
+                        .st_ctim = now,
+                    };
+                }
+                else if constexpr (std::is_same_v<InodeType, file_t>) {
+                    inode_stat = {
+                        .st_dev = 0,
+                        .st_ino = new_index,
+                        .st_nlink = 1,
+                        .st_mode = S_IFREG | 0755,
+                        .st_uid = getuid(),
+                        .st_gid = getgid(),
+                        .st_rdev = 0,
+                        .st_size = 0,
+                        .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
+                        .st_blocks = 0,
+                        .st_atim = now,
+                        .st_mtim = now,
+                        .st_ctim = now,
+                    };
+                }
+                else if constexpr (std::is_same_v<InodeType, inode_t>) {
+                    inode_stat = {
+                        .st_dev = 0,
+                        .st_ino = new_index,
+                        .st_nlink = 1,
+                        .st_mode = S_IFREG | 0755,
+                        .st_uid = getuid(),
+                        .st_gid = getgid(),
+                        .st_rdev = 0,
+                        .st_size = 0,
+                        .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
+                        .st_blocks = 0,
+                        .st_atim = now,
+                        .st_mtim = now,
+                        .st_ctim = now,
+                    };
+                }
+                std::memcpy(new_lock.data(), &inode_stat, sizeof(inode_stat)); // new inode struct stat
+            }
         }
     };
 }

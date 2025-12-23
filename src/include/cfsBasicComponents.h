@@ -157,60 +157,6 @@ namespace cfs
             return ret;
         }
     };
-
-    // template<uint64_t static_cache_size>
-    // cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::static_cache_t() {
-    //     bitmap_static_level_cache_.reserve(static_cache_size);
-    // }
-    //
-    // template<uint64_t static_cache_size>
-    // void cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::set_fast_cache(
-    //     const uint64_t index,
-    //     const bool val)
-    // {
-    //     std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
-    //     if (bitmap_static_level_cache_.size() > static_cache_size)
-    //     {
-    //         std::vector<std::pair<uint64_t, uint64_t>> access_cache_;
-    //         for (auto ptr = bitmap_static_level_cache_.begin(); ptr != bitmap_static_level_cache_.end();++ptr)
-    //         {
-    //             if (auto acc = bitmap_static_level_access_counter_.find(ptr->first);
-    //                 acc == bitmap_static_level_access_counter_.end())
-    //             {
-    //                 bitmap_static_level_cache_.erase(ptr);
-    //             }
-    //         }
-    //
-    //         for (const auto & [pos, rate] : bitmap_static_level_access_counter_) {
-    //             access_cache_.emplace_back(pos, rate);
-    //         }
-    //
-    //         std::ranges::sort(access_cache_,
-    //                           [](const std::pair <uint64_t, uint64_t> & a, const std::pair <uint64_t, uint64_t> & b)->bool {
-    //                               return a.second < b.second;
-    //                           });
-    //         access_cache_.resize(access_cache_.size() / 2);
-    //         std::ranges::for_each(access_cache_, [&](const std::pair <uint64_t, uint64_t> & pos) {
-    //             bitmap_static_level_cache_.erase(pos.first);
-    //         });
-    //         bitmap_static_level_access_counter_.clear();
-    //     }
-    //
-    //     bitmap_static_level_cache_[index] = val;
-    // }
-    //
-    // template<uint64_t static_cache_size>
-    // int cfs_bitmap_block_mirroring_t::static_cache_t<static_cache_size>::get_fast_cache(const uint64_t index)
-    // {
-    //     std::lock_guard<std::mutex> guard(static_level_cache_mtx_);
-    //     const auto ptr = bitmap_static_level_cache_.find(index);
-    //     if (ptr == bitmap_static_level_cache_.end()) {
-    //         return -1;
-    //     }
-    //
-    //     bitmap_static_level_access_counter_[index]++;
-    //     return ptr->second;
-    // }
     
     class block_status { };    // => BlockStatusType
     class block_type { };      // => BlockType
@@ -607,6 +553,7 @@ namespace cfs
     class cfs_inode_service_t : protected cfs_inode_t
     {
         std::vector < uint8_t > before_;
+        std::mutex mutex_;
 
     protected:
         filesystem::guard inode_effective_lock_;
@@ -775,7 +722,7 @@ namespace cfs
         void set_mtime(timespec st_mtim);   // change st_mtim
 
         /// get struct stat
-        [[nodiscard]] struct stat get_stat () const { return *cfs_inode_attribute; }
+        [[nodiscard]] struct stat get_stat ();
 
         friend class inode_t;
     };

@@ -700,6 +700,7 @@ cfs::cfs_inode_service_t::cfs_inode_service_t(
 
 cfs::cfs_inode_service_t::~cfs_inode_service_t()
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (!!std::memcpy(before_.data(), inode_effective_lock_.data(), inode_effective_lock_.size())) {
         block_attribute_->set<block_checksum>(block_index_,
             utils::arithmetic::hash5(reinterpret_cast<uint8_t *>(inode_effective_lock_.data()), inode_effective_lock_.size())
@@ -709,6 +710,7 @@ cfs::cfs_inode_service_t::~cfs_inode_service_t()
 
 uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const uint64_t offset)
 {
+    std::lock_guard<std::mutex> lock_guard_(mutex_);
     if (this->cfs_inode_attribute->st_size == 0) return 0; // skip read if size is 0
     const auto [level1, level2, level3] = linearize_all_blocks();
     const auto skipped_blocks = offset / block_size_;
@@ -747,6 +749,7 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, const uint64_t size, const 
 
 uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, const uint64_t offset, const bool hole_write)
 {
+    std::lock_guard<std::mutex> lock_guard_(mutex_);
     bool success = false;
     g_transaction(journal_, success, GlobalTransaction_Major_WriteInode, offset, size);
     if (this->cfs_inode_attribute->st_size < (size + offset)) {
@@ -850,6 +853,7 @@ uint64_t cfs::cfs_inode_service_t::write(const char *data, const uint64_t size, 
 
 void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     if (new_size == this->cfs_inode_attribute->st_size) return; // skip size change if no size change is intended
     const auto descriptor = size_to_linearized_block_descriptor(new_size);
     commit_from_block_descriptor(descriptor);
@@ -858,36 +862,49 @@ void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
 
 void cfs::cfs_inode_service_t::chdev(const int dev)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_dev = dev;
 }
 
 void cfs::cfs_inode_service_t::chrdev(const dev_t dev)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_rdev = dev;
 }
 
 void cfs::cfs_inode_service_t::chmod(const int mode)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_mode = mode;
 }
 
 void cfs::cfs_inode_service_t::chown(const int uid, const int gid)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_uid = uid;
     this->cfs_inode_attribute->st_gid = gid;
 }
 
 void cfs::cfs_inode_service_t::set_atime(const timespec st_atim)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_atim = st_atim;
 }
 
 void cfs::cfs_inode_service_t::set_ctime(const timespec st_ctim)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_atim = st_ctim;
 }
 
 void cfs::cfs_inode_service_t::set_mtime(const timespec st_mtim)
 {
+    std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_atim = st_mtim;
+}
+
+struct stat cfs::cfs_inode_service_t::get_stat()
+{
+    std::lock_guard<std::mutex> lock(mutex_);
+    return *cfs_inode_attribute;
 }
