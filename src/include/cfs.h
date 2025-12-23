@@ -48,6 +48,7 @@ namespace cfs
             } flags;
             uint64_t last_allocated_block;
             uint64_t allocated_non_cow_blocks;
+            uint64_t root_inode_pointer;
         };
         runtime_info_t runtime_info; // runtime info
         runtime_info_t runtime_info_cow; // cow of the last change
@@ -58,8 +59,6 @@ namespace cfs
             uint64_t _1;
             uint64_t _2;
             uint64_t _3;
-            uint64_t _4;
-            uint64_t _5;
         } _reserved_;
     };
     static_assert(sizeof(cfs_head_t) == cfs_header_size, "Faulty header size");

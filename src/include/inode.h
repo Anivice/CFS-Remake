@@ -22,6 +22,7 @@ namespace cfs
         inode_t * parent_inode_;
         std::unique_ptr < cfs_inode_service_t > referenced_inode_;
         uint64_t current_referenced_inode_;
+        const decltype(inode_construct_info_.parent_fs_governor->static_info_) * static_info_;
 
         std::mutex dentry_map_mutex_;
         tsl::hopscotch_map<std::string, uint64_t> dentry_map_;
@@ -68,7 +69,7 @@ namespace cfs
         std::vector<uint8_t> dump_inode_raw() const
         {
             std::vector<uint8_t> my_data;
-            my_data.resize(inode_construct_info_.parent_fs_governor->static_info_.block_size); // inode metadata size
+            my_data.resize(static_info_->block_size); // inode metadata size
             std::memcpy(my_data.data(), referenced_inode_->inode_effective_lock_.data(), my_data.size());
             return my_data;
         }
@@ -105,6 +106,43 @@ namespace cfs
             std::vector<uint8_t> data_;
             if (parent_inode_ == nullptr) // Root inode, write inode into metadata dentry section
             {
+                // create a new block
+                const auto new_inode_num_ = inode_construct_info_.block_manager->allocate();
+                // set attributes
+                inode_construct_info_.block_attribute->clear(new_inode_num_, {
+                    .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+                    .block_type = INDEX_NODE_BLOCK,
+                    .block_type_cow = 0,
+                    .allocation_oom_scan_per_refresh_count = 0,
+                    .newly_allocated_thus_no_cow = 0,
+                    .index_node_referencing_number = 1,
+                    .block_checksum = 0,
+                });
+
+                /// dump my own data to new inode
+                {
+                    const auto new_lock = inode_construct_info_.parent_fs_governor->
+                        lock(new_inode_num_ + static_info_->data_table_start);
+                    std::memcpy(new_lock.data(), referenced_inode_->inode_effective_lock_.data(), static_info_->block_size);
+                }
+
+                const auto old_ = current_referenced_inode_;
+                current_referenced_inode_ = new_inode_num_; // get new inode
+                referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
+                    inode_construct_info_.parent_fs_governor,
+                    inode_construct_info_.block_manager,
+                    inode_construct_info_.journal,
+                    inode_construct_info_.block_attribute); // relocate
+
+                ////////////////////////////////////////////////////////////////////////////////////////////////////////
+                /////////////  _    _______ _____ _____ _____  ______ _____   _____ _   _ ______ _____    //////////////
+                ///////////// | |  | | ___ \_   _|_   _|  ___| |  ___/  ___| |_   _| \ | ||  ___|  _  |   //////////////
+                ///////////// | |  | | |_/ / | |   | | | |__   | |_  \ `--.    | | |  \| || |_  | | | |   //////////////
+                ///////////// | |/\| |    /  | |   | | |  __|  |  _|  `--. \   | | | . ` ||  _| | | | |   //////////////
+                ///////////// \  /\  / |\ \ _| |_  | | | |___  | |   /\__/ /  _| |_| |\  || |   \ \_/ /   //////////////
+                /////////////  \/  \/\_| \_|\___/  \_/ \____/  \_|   \____/   \___/\_| \_/\_|    \___/    //////////////
+                ////////////////////////////////////////////////////////////////////////////////////////////////////////
+
                 // [BITMAP]
                 // [ATTRIBUTES]
                 // [INODE]
@@ -144,6 +182,13 @@ namespace cfs
                 /// [DENTRY]
                 dentry_start_ = data_compressed.size(); // so save_dentry_unblocked() knows where to continue
                 save_dentry_unblocked();
+
+                // relink root
+                inode_construct_info_.parent_fs_governor->cfs_header_block.set_info<root_inode_pointer>(new_inode_num_);
+
+                // change old to redundancy
+                inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
+                inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
             }
             else if (inode_type() == S_IFDIR) // dentry, but not root
             {
@@ -164,7 +209,7 @@ namespace cfs
                     // copy over
                     const auto new_block = inode_construct_info_.block_manager->allocate();
                     const auto new_lock = referenced_inode_->lock_page(new_block);
-                    cfs_assert_simple(content.size() == inode_construct_info_.parent_fs_governor->static_info_.block_size);
+                    cfs_assert_simple(content.size() == static_info_->block_size);
                     std::memcpy(new_lock->data(), content.data(), content.size());
                     // set attributes
                     inode_construct_info_.block_attribute->clear(new_block, {
@@ -215,7 +260,7 @@ namespace cfs
             cfs_block_manager_t * block_manager,
             cfs_journaling_t * journal,
             cfs_block_attribute_access_t * block_attribute,
-            inode_t * parent_inode) : parent_inode_(parent_inode)
+            inode_t * parent_inode) : parent_inode_(parent_inode), static_info_(&parent_fs_governor->static_info_)
         {
             current_referenced_inode_ = index;
             referenced_inode_ = std::make_unique<cfs_inode_service_t>(index, parent_fs_governor, block_manager, journal, block_attribute);

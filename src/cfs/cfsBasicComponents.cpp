@@ -285,7 +285,15 @@ uint64_t cfs::cfs_block_manager_t::allocate()
     auto allocate_at_this_index = [&](const uint64_t index)
     {
         bitmap_->set_bit(index, true);
-        block_attribute_->clear(index, { .newly_allocated_thus_no_cow = 1 });
+        block_attribute_->clear(index, {
+            .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+            .block_type = STORAGE_BLOCK,
+            .block_type_cow = 0,
+            .allocation_oom_scan_per_refresh_count = 0,
+            .newly_allocated_thus_no_cow = 1,
+            .index_node_referencing_number = 1,
+            .block_checksum = 0
+        });
     };
 
     auto refresh_allocate = [&](bool & success, const uint64_t start, const uint64_t end)
@@ -377,7 +385,7 @@ uint64_t cfs::cfs_block_manager_t::allocate()
 
 void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
 {
-    cfs_assert_simple(index != 0);
+    // cfs_assert_simple(index != 0);
     bool success = false;
     g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
     bitmap_->set_bit(index, false);

@@ -26,7 +26,7 @@ namespace cfs
     class last_allocated_block { };
     class allocated_non_cow_blocks { };
     // class allocation_bitmap_checksum { };
-    // class allocation_bitmap_checksum_cow { };
+    class root_inode_pointer { };
     class mount_timestamp { };
     class last_check_timestamp { };
     class snapshot_number { };
@@ -173,7 +173,7 @@ namespace cfs
                 (std::is_same_v<Type, last_allocated_block>
                     || std::is_same_v<Type, allocated_non_cow_blocks>
                     // || std::is_same_v<Type, allocation_bitmap_checksum>
-                    // || std::is_same_v<Type, allocation_bitmap_checksum_cow>
+                    || std::is_same_v<Type, root_inode_pointer>
                     || std::is_same_v<Type, mount_timestamp>
                     || std::is_same_v<Type, last_check_timestamp>
                     || std::is_same_v<Type, snapshot_number>
@@ -187,7 +187,7 @@ namespace cfs
                 (std::is_same_v<Type, last_allocated_block>
                     || std::is_same_v<Type, allocated_non_cow_blocks>
                     // || std::is_same_v<Type, allocation_bitmap_checksum>
-                    // || std::is_same_v<Type, allocation_bitmap_checksum_cow>
+                    || std::is_same_v<Type, root_inode_pointer>
                     || std::is_same_v<Type, mount_timestamp>
                     || std::is_same_v<Type, last_check_timestamp>
                     || std::is_same_v<Type, snapshot_number>
@@ -200,12 +200,8 @@ namespace cfs
                 (std::is_same_v<Type, last_allocated_block>
                     || std::is_same_v<Type, allocated_non_cow_blocks>
                     // || std::is_same_v<Type, allocation_bitmap_checksum>
-                    // || std::is_same_v<Type, allocation_bitmap_checksum_cow>
-                    || std::is_same_v<Type, mount_timestamp>
-                    || std::is_same_v<Type, last_check_timestamp>
                     || std::is_same_v<Type, snapshot_number>
-                    || std::is_same_v<Type, snapshot_number_cow>
-                    || std::is_same_v<Type, flags>)
+                    || std::is_same_v<Type, snapshot_number_cow>)
             void inc();
 
             template < typename Type >
@@ -213,12 +209,8 @@ namespace cfs
                 (std::is_same_v<Type, last_allocated_block>
                     || std::is_same_v<Type, allocated_non_cow_blocks>
                     // || std::is_same_v<Type, allocation_bitmap_checksum>
-                    // || std::is_same_v<Type, allocation_bitmap_checksum_cow>
-                    || std::is_same_v<Type, mount_timestamp>
-                    || std::is_same_v<Type, last_check_timestamp>
                     || std::is_same_v<Type, snapshot_number>
-                    || std::is_same_v<Type, snapshot_number_cow>
-                    || std::is_same_v<Type, flags>)
+                    || std::is_same_v<Type, snapshot_number_cow>)
             void dec();
 
         private:
@@ -295,7 +287,7 @@ namespace cfs
         std::is_same_v<Type, cfs::last_allocated_block> ||
         std::is_same_v<Type, cfs::allocated_non_cow_blocks> ||
         // std::is_same_v<Type, cfs::allocation_bitmap_checksum> ||
-        // std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow> ||
+        std::is_same_v<Type, cfs::root_inode_pointer> ||
         std::is_same_v<Type, cfs::mount_timestamp> ||
         std::is_same_v<Type, cfs::last_check_timestamp> ||
         std::is_same_v<Type, cfs::snapshot_number> ||
@@ -313,9 +305,9 @@ namespace cfs
         // if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum>) {
             // return load().allocation_bitmap_checksum;
         // }
-        // if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow>) {
-            // return load().allocation_bitmap_checksum_cow;
-        // }
+        if constexpr (std::is_same_v<Type, cfs::root_inode_pointer>) {
+            return load().root_inode_pointer;
+        }
         if constexpr (std::is_same_v<Type, cfs::mount_timestamp>) {
             return load().mount_timestamp;
         }
@@ -340,7 +332,7 @@ namespace cfs
         std::is_same_v<Type, cfs::last_allocated_block> ||
         std::is_same_v<Type, cfs::allocated_non_cow_blocks> ||
         // std::is_same_v<Type, cfs::allocation_bitmap_checksum> ||
-        // std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow> ||
+        std::is_same_v<Type, cfs::root_inode_pointer> ||
         std::is_same_v<Type, cfs::mount_timestamp> ||
         std::is_same_v<Type, cfs::last_check_timestamp> ||
         std::is_same_v<Type, cfs::snapshot_number> ||
@@ -359,9 +351,9 @@ namespace cfs
         // else if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum>) {
             // info.allocation_bitmap_checksum = field;
         // }
-        // else if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow>) {
-            // info.allocation_bitmap_checksum_cow = field;
-        // }
+        else if constexpr (std::is_same_v<Type, cfs::root_inode_pointer>) {
+            info.root_inode_pointer = field;
+        }
         else if constexpr (std::is_same_v<Type, cfs::mount_timestamp>) {
             info.mount_timestamp = field;
         }
@@ -385,12 +377,8 @@ namespace cfs
         std::is_same_v<Type, cfs::last_allocated_block> ||
         std::is_same_v<Type, cfs::allocated_non_cow_blocks> ||
         // std::is_same_v<Type, cfs::allocation_bitmap_checksum> ||
-        // std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow> ||
-        std::is_same_v<Type, cfs::mount_timestamp> ||
-        std::is_same_v<Type, cfs::last_check_timestamp> ||
         std::is_same_v<Type, cfs::snapshot_number> ||
-        std::is_same_v<Type, cfs::snapshot_number_cow> ||
-        std::is_same_v<Type, cfs::flags>)
+        std::is_same_v<Type, cfs::snapshot_number_cow>)
     void filesystem::cfs_header_block_t::inc()
     {
         std::lock_guard lock(mtx_);
@@ -399,25 +387,16 @@ namespace cfs
             info.last_allocated_block++;
         }
         else if constexpr (std::is_same_v<Type, cfs::allocated_non_cow_blocks>) {
-            info.allocated_non_cow_blocks ++;
+            info.allocated_non_cow_blocks++;
         }
         // else if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum>) {
             // info.allocation_bitmap_checksum ++;
         // }
-        // else if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow>) {
-            // info.allocation_bitmap_checksum_cow ++;
-        // }
-        else if constexpr (std::is_same_v<Type, cfs::mount_timestamp>) {
-            info.mount_timestamp ++;
-        }
-        else if constexpr (std::is_same_v<Type, cfs::last_check_timestamp>) {
-            info.last_check_timestamp ++;
-        }  // last time check ran
         else if constexpr (std::is_same_v<Type, cfs::snapshot_number>) {
-            info.snapshot_number ++;
+            info.snapshot_number++;
         }
         else if constexpr (std::is_same_v<Type, cfs::snapshot_number_cow>) {
-            info.snapshot_number_cow ++;
+            info.snapshot_number_cow++;
         }
         set(info);
     }
@@ -425,42 +404,24 @@ namespace cfs
     template<typename Type> requires (
         std::is_same_v<Type, cfs::last_allocated_block> ||
         std::is_same_v<Type, cfs::allocated_non_cow_blocks> ||
-        // std::is_same_v<Type, cfs::allocation_bitmap_checksum> ||
-        // std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow> ||
-        std::is_same_v<Type, cfs::mount_timestamp> ||
-        std::is_same_v<Type, cfs::last_check_timestamp> ||
         std::is_same_v<Type, cfs::snapshot_number> ||
-        std::is_same_v<Type, cfs::snapshot_number_cow> ||
-        std::is_same_v<Type, cfs::flags>)
+        std::is_same_v<Type, cfs::snapshot_number_cow>)
     void filesystem::cfs_header_block_t::dec()
     {
         std::lock_guard lock(mtx_);
         auto info = load();
         if constexpr (std::is_same_v<Type, cfs::last_allocated_block>) {
-            info.last_allocated_block --;
+            info.last_allocated_block--;
         }
         else if constexpr (std::is_same_v<Type, cfs::allocated_non_cow_blocks>) {
-            info.allocated_non_cow_blocks --;
+            info.allocated_non_cow_blocks--;
         }
-        // else if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum>) {
-            // info.allocation_bitmap_checksum --;
-        // }
-        // else if constexpr (std::is_same_v<Type, cfs::allocation_bitmap_checksum_cow>) {
-            // info.allocation_bitmap_checksum_cow --;
-        // }
-        else if constexpr (std::is_same_v<Type, cfs::mount_timestamp>) {
-            info.mount_timestamp --;
-        }
-        else if constexpr (std::is_same_v<Type, cfs::last_check_timestamp>) {
-            info.last_check_timestamp --;
-        }  // last time check ran
         else if constexpr (std::is_same_v<Type, cfs::snapshot_number>) {
-            info.snapshot_number --;
+            info.snapshot_number--;
         }
         else if constexpr (std::is_same_v<Type, cfs::snapshot_number_cow>) {
-            info.snapshot_number_cow --;
+            info.snapshot_number_cow--;
         }
-
         set(info);
     }
 }
