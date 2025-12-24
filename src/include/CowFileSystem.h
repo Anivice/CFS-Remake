@@ -54,11 +54,11 @@ namespace cfs
         /// and cancel out all the relative jumps like . and ..
         /// return a clean path
         /// @return clean path
-        std::string path_calculator(const std::string & path) const noexcept;
+        [[nodiscard]] std::string path_calculator(const std::string & path) const noexcept;
 
         using deferenced_pairs_t = struct {
             std::shared_ptr < inode_t > child;
-            std::vector<std::shared_ptr < dentry_t > > parents;
+            std::vector < std::shared_ptr < dentry_t > > parents;
         };
 
         using vpath_t = std::vector<std::string>;

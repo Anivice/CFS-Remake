@@ -38,6 +38,7 @@
     < mkdir             (Create a directory):                       [CFSP]                  >,
     < rmdir             (Remove a directory):                       [CFSP]                  >,
     < tree              (DOS-like tree command):                    [CFSP]                  >,
+    < free              (Show filesystem usage):                    [CFSP]                  >,
 
     # debug options:
     < debug     (Debug commands):

@@ -255,19 +255,23 @@ std::vector<uint8_t> cfs::utils::arithmetic::compress(const std::vector<uint8_t>
     const int cSize = LZ4_compress_default(reinterpret_cast<const char *>(data.data()),
         reinterpret_cast<char *>(ret.data()), static_cast<int>(data.size()), maxDst);  // returns 0 on failure
     if (cSize == 0) { return { }; }
-    ret.resize(cSize + sizeof(uint64_t));
-    *reinterpret_cast<uint64_t *>(ret.data() + cSize) = data_size;
+    ret.reserve(cSize + sizeof(uint64_t));
+    ret.resize(cSize);
+    for (uint64_t i = 0; i < sizeof(uint64_t); ++i) {
+        ret.push_back(reinterpret_cast<const char *>(&data_size)[i]);
+    }
     return ret;
 }
 
 std::vector<uint8_t> cfs::utils::arithmetic::decompress(const std::vector<uint8_t> & data) noexcept
 {
     std::vector < uint8_t > result;
-    const auto * cSize = reinterpret_cast<const uint64_t *>(data.data() + data.size() - sizeof(uint64_t));
-    result.resize(*cSize);
+    uint64_t cSize = 0;
+    std::memcpy(&cSize, data.data() + data.size() - sizeof(uint64_t), sizeof(uint64_t));
+    result.resize(cSize);
     const int dSize = LZ4_decompress_safe(reinterpret_cast<const char *>(data.data()), reinterpret_cast<char *>(result.data()),
                                           static_cast<int>(data.size() - sizeof(uint64_t)),
-                                          static_cast<int>(*cSize));
+                                          static_cast<int>(cSize));
     if (dSize < 0) return { };   // malformed input or dst too small
     return result;
 }

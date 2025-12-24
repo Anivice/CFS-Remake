@@ -323,10 +323,8 @@ namespace cfs
                     elog("Error: ", strerror(-result_getattr), " when reading attributes for ", path_, "\n");
                 }
 
-                struct timespec ts { };
-                timespec_get(&ts, TIME_UTC);
                 char buff[100] { };
-                strftime(buff, sizeof buff, "%D %T", gmtime(&ts.tv_sec));
+                strftime(buff, sizeof buff, "%D %T", gmtime(&st.st_mtim.tv_sec));
 
                 std::vector<std::string> line;
                 utils::print(line, path_ + ((st.st_mode & S_IFMT) == S_IFDIR ? "/" : ""), utils::value_to_size(st.st_size), buff);
@@ -501,7 +499,7 @@ namespace cfs
                 &journaling_,
                 &block_attribute_,
                 nullptr),
-            .parents = { }
+            .parents = { nullptr }
         };
     }
 
@@ -520,7 +518,8 @@ namespace cfs
     {
         GENERAL_TRY() {
             const auto vpath = path_to_vector(path);
-            const auto [child, parent] = deference_inode_from_path(vpath);
+            const auto [child, parent]
+                = deference_inode_from_path(vpath);
             *stbuf = child->get_stat();
             return 0;
         }
@@ -531,10 +530,13 @@ namespace cfs
     {
         GENERAL_TRY() {
             const auto vpath = path_to_vector(path);
-            const auto [child, parents] = deference_inode_from_path(vpath);
-            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
-                auto * dentry = dynamic_cast<dentry_t*>(child.get());
-                const auto list = dentry->ls() | std::views::keys;
+            auto [child, parents]
+                = deference_inode_from_path(vpath);
+            const auto child_stat = child->get_stat();
+            child.reset(); // release child, its parents are under capture (so is root) so it cannot be tempered
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR) {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                const auto list = dentry.ls() | std::views::keys;
                 entries.reserve(list.size());
                 std::ranges::for_each(list, [&](const std::string & p){ entries.push_back(p); });
                 return 0;
@@ -556,10 +558,20 @@ namespace cfs
             const auto target = vpath.back();
             vpath.pop_back();
 
-            const auto [child, parents] = deference_inode_from_path(vpath);
-            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
-                auto * dentry = dynamic_cast<dentry_t*>(child.get());
-                auto new_dentry = dentry->make_inode<dentry_t>(target);
+            auto [child, parents]
+                = deference_inode_from_path(vpath);
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR) {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                const auto list = dentry.ls();
+
+                // see if target exists
+                if (list.find(target) != list.end()) {
+                    return -EEXIST;
+                }
+
+                auto new_dentry = dentry.make_inode<dentry_t>(target);
                 new_dentry.chmod(mode | S_IFDIR);
                 return 0;
             }
@@ -606,10 +618,13 @@ namespace cfs
             const auto target = vpath.back();
             vpath.pop_back();
 
-            const auto [child, parents] = deference_inode_from_path(vpath);
-            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
-                auto * dentry = dynamic_cast<dentry_t*>(child.get());
-                auto inode = dentry->make_inode<inode_t>(target);
+            auto [child, parents]
+                = deference_inode_from_path(vpath);
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR) {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                auto inode = dentry.make_inode<inode_t>(target);
                 inode.chmod(mode | S_IFREG);
                 return 0;
             }
@@ -710,10 +725,14 @@ namespace cfs
             const auto target = vpath.back();
             vpath.pop_back();
 
-            const auto [child, parents] = deference_inode_from_path(vpath);
-            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
-                auto * dentry = dynamic_cast<dentry_t*>(child.get());
-                dentry->unlink(target);
+            auto [child, parents]
+                = deference_inode_from_path(vpath);
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                dentry.unlink(target);
                 return 0;
             }
 
@@ -733,11 +752,14 @@ namespace cfs
             const auto target = vpath.back();
             vpath.pop_back();
 
-            const auto [child, parents] = deference_inode_from_path(vpath);
-            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR)
+            auto [child, parents]
+                = deference_inode_from_path(vpath);
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
             {
-                auto * dentry = dynamic_cast<dentry_t*>(child.get());
-                const auto list = dentry->ls();
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                const auto list = dentry.ls();
                 const auto ptr = list.find(target);
                 if (ptr == list.end()) {
                     return -ENOENT;
@@ -747,7 +769,7 @@ namespace cfs
 
                 // check if dir is empty
                 {
-                    auto tg_inode = make_child_inode<dentry_t>(index, dentry);
+                    auto tg_inode = make_child_inode<dentry_t>(index, &dentry);
                     if ((tg_inode.get_stat().st_mode & S_IFMT) != S_IFDIR) {
                         return -ENOTDIR;
                     }
@@ -758,7 +780,7 @@ namespace cfs
                 }
 
                 // remove when empty
-                dentry->unlink(target);
+                dentry.unlink(target);
                 return 0;
             }
 
@@ -794,11 +816,14 @@ namespace cfs
 
             const auto [source, parents]
                 = deference_inode_from_path(source_vpath);
-            const auto [target_parent, target_parent_parents]
+            auto [target_parent, target_parent_parents]
                 = deference_inode_from_path(source_vpath);
 
-            auto dentry = dynamic_cast<dentry_t*>(target_parent.get());
-            auto inode = dentry->make_inode<inode_t>(target);
+            const auto target_parent_stat = target_parent->get_stat();;
+            target_parent.reset();
+
+            auto dentry = make_child_inode<dentry_t>(target_parent_stat.st_ino, parents.back().get());
+            auto inode = dentry.make_inode<inode_t>(target);
             inode.chmod(S_IFLNK | 0755);
             inode.write(path.c_str(), path.size(), 0);
             return -ENOTDIR;
@@ -830,16 +855,21 @@ namespace cfs
             const auto target = target_vpath.back();
             target_vpath.pop_back();
 
-            const auto [source_parent, source_parent_parents]
+            auto [source_parent, source_parent_parents]
                 = deference_inode_from_path(source_vpath);
-            const auto [target_parent, target_parent_parents]
+            auto [target_parent, target_parent_parents]
                 = deference_inode_from_path(source_vpath);
 
-            auto source_parent_inode = dynamic_cast<dentry_t*>(source_parent.get());
-            auto target_parent_inode = dynamic_cast<dentry_t*>(target_parent.get());
+            const auto source_parent_stat = source_parent->get_stat();
+            const auto target_parent_stat = target_parent->get_stat();
+            source_parent.reset();
+            target_parent.reset();
 
-            const auto source_index = source_parent_inode->erase_entry(source);
-            target_parent_inode->add_entry(target, source_index);
+            auto source_parent_inode = make_child_inode<dentry_t>(source_parent_stat.st_ino, source_parent_parents.back().get());
+            auto target_parent_inode = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get());
+
+            const auto source_index = source_parent_inode.erase_entry(source);
+            target_parent_inode.add_entry(target, source_index);
 
             return 0;
         }
@@ -857,12 +887,24 @@ namespace cfs
             const auto target = vpath.back();
             vpath.pop_back();
 
-            const auto [child, parents] = deference_inode_from_path(vpath);
-            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
-                auto * dentry = dynamic_cast<dentry_t*>(child.get());
-                auto inode = dentry->make_inode<inode_t>(target);
-                inode.chmod(mode | S_IFREG);
-                inode.resize(offset + length);
+            auto [child, parents]
+                = deference_inode_from_path(vpath);
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                const auto list = dentry.ls();
+                const auto ptr = list.find(target);
+                if (ptr == list.end()) {
+                    auto inode = dentry.make_inode<inode_t>(target);
+                    inode.chmod(mode | S_IFREG);
+                    inode.resize(offset + length);
+                } else {
+                    auto inode = make_child_inode<inode_t>(ptr->second, &dentry); // target exists so we write
+                    inode.chmod(mode | S_IFREG);
+                    inode.resize(offset + length);
+                }
                 return 0;
             }
 
@@ -875,7 +917,8 @@ namespace cfs
     {
         GENERAL_TRY() {
             const auto vpath = path_to_vector(path);
-            const auto [child, parents] = deference_inode_from_path(vpath);
+            const auto [child, parents]
+                = deference_inode_from_path(vpath);
             if ((child->get_stat().st_mode & S_IFMT) == S_IFLNK) {
                 const auto len = child->read(buffer, size, 0);
                 buffer[std::min(len, size)] = '\0';
@@ -898,10 +941,14 @@ namespace cfs
             const auto target = vpath.back();
             vpath.pop_back();
 
-            const auto [child, parents] = deference_inode_from_path(vpath);
-            if ((child->get_stat().st_mode & S_IFMT) == S_IFDIR) {
-                auto * dentry = dynamic_cast<dentry_t*>(child.get());
-                auto inode = dentry->make_inode<inode_t>(target);
+            auto [child, parents]
+                = deference_inode_from_path(vpath);
+            const auto child_stat = child->get_stat();
+            child.reset(); // release child, its parents are under capture (so is root) so it cannot be tempered
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                auto inode = dentry.make_inode<inode_t>(target);
                 inode.chmod(mode);
                 inode.chdev(device);
                 return 0;
@@ -974,16 +1021,30 @@ namespace cfs
             copy_from_host(vec);
         }
         else if (vec.front() =="mkdir") {
-            copy_from_host(vec);
+            if (vec.size() == 2) {
+                do_mkdir(vec[1], S_IFDIR | 0755);
+            } else {
+                elog("mkdir [CFS Path]");
+            }
         }
         else if (vec.front() =="rmdir") {
-            copy_from_host(vec);
+            if (vec.size() == 2) {
+                do_rmdir(vec[1]);
+            } else {
+                elog("rmdir [CFS Path]");
+            }
         }
         else if (vec.front() =="del") {
-            copy_from_host(vec);
+            if (vec.size() == 2) {
+                do_unlink(vec[1]);
+            } else {
+                elog("del [CFS Path]");
+            }
         }
         else if (vec.front() =="copy") {
-            copy_from_host(vec);
+        }
+        else if (vec.front() =="free") {
+
         }
 
 
