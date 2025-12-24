@@ -402,7 +402,7 @@ namespace cfs
         else
         {
             const auto cfs_path_src = path_calculator(vec[1]);
-            const auto cfs_path_dest = path_calculator(vec[1]);
+            const auto cfs_path_dest = path_calculator(vec[2]);
             struct stat status {};
             if (const int result = do_getattr(cfs_path_src, &status); result != 0) {
                 elog("getattr:", strerror(-result), "\n");
@@ -514,7 +514,7 @@ namespace cfs
             const auto path = auto_path(vec[1]);
             struct stat status {};
             if (const int result = do_getattr(path, &status) != 0) {
-                elog("getattr:", strerror(-result), "\n");
+                elog("getattr: ", strerror(-result), "\n");
                 return;
             }
 
@@ -533,10 +533,18 @@ namespace cfs
         std::cout << cfs_pwd_ << std::endl;
     }
 
-    void CowFileSystem::move(const std::vector<std::string> &vec) {
-    }
-
-    void CowFileSystem::symlink(const std::vector<std::string> &vec) {
+    void CowFileSystem::move(const std::vector<std::string> &vec)
+    {
+        if (vec.size() == 3) {
+            const auto cfs_path_src = path_calculator(vec[1]);
+            const auto cfs_path_dest = path_calculator(vec[2]);
+            const int rename_result = do_rename(cfs_path_src, cfs_path_dest);
+            if (rename_result != 0) {
+                elog("move: ", strerror(-rename_result), "\n");
+            }
+        } else {
+            elog("move [CFS Path] [CFS Path]\n");
+        }
     }
 
     std::vector<std::string> CowFileSystem::path_to_vector(const std::string &path) noexcept
@@ -1171,6 +1179,7 @@ namespace cfs
             del(vec);
         }
         else if (vec.front() =="copy") {
+            copy(vec);
         }
         else if (vec.front() =="cd") {
             cd(vec);
@@ -1180,6 +1189,12 @@ namespace cfs
         }
         else if (vec.front() =="free") {
             free();
+        }
+        else if (vec.front() =="move") {
+            move(vec);
+        }
+        else if (vec.front() =="sync") {
+            cfs_basic_filesystem_.sync();
         }
 
 
@@ -1216,6 +1231,9 @@ namespace cfs
             else {
                 elog("Failed to parse command\n");
             }
+        }
+        else {
+            elog("Failed to parse command\n");
         }
 
         return true;

@@ -26,20 +26,20 @@
     < cd        (Change current PWD):                               [CFSP]                  >,          # Implemented
     < pwd       (Show PWD):                                         [NONE]                  >,          # Implemented
 
-    < copy_to_host      (Copy a file to host filesystem):           [CFSP],     [HSP]       >,          # Implemented
-    < copytree_to_host  (Copy a file from host to CFS recursively): [CFSP],     [HSP]       >,
+    < copy_to_host      (Copy a file from CFS to host filesystem):  [CFSP],     [HSP]       >,          # Implemented
+    < copytree_to_host  (Copy a file from CFS to host recursively): [CFSP],     [HSP]       >,
     < copy_from_host    (Copy a file from host to CFS):             [HSP],      [CFSP]      >,          # Implemented
     < copytree_from_host(Copy a file from host to CFS recursively): [HSP],      [CFSP]      >,
-    < copy              (Copy a file):                              [CFSP],     [CFSP]      >,
-    < move              (Move a file):                              [CFSP],     [CFSP]      >,
+    < copy              (Copy a file):                              [CFSP],     [CFSP]      >,          # Implemented
+    < move              (Move a file):                              [CFSP],     [CFSP]      >,          # Implemented
     < del               (Delete a file):                            [CFSP]                  >,          # Implemented
     < deltree           (Delete recursively):                       [CFSP]                  >,
     < copytree          (Copy recursively):                         [CFSP],     [CFSP]      >,
-    < symlink           (Create a symbol link):                     [CFSP],     [CFSP]      >,
     < mkdir             (Create a directory):                       [CFSP]                  >,          # Implemented
     < rmdir             (Remove a directory):                       [CFSP]                  >,          # Implemented
     < tree              (DOS-like tree command):                    [CFSP]                  >,
     < free              (Show filesystem usage):                    [CFSP]                  >,          # Implemented
+    < sync              (Synchronize filesystem):                   [NONE]                  >,
 
     # debug options:
     < debug     (Debug commands):
@@ -55,7 +55,7 @@
                                     < journal   (Show journal):     [NONE]                  >,          # Implemented
                 >,
                 < check (Check correctness):
-                                    < hash5 (Block attribute hash table): [NONE]            >           # Implemented
+                                    < hash5 (Check block attribute hash table): [NONE]      >           # Implemented
                 >,
     >
 }

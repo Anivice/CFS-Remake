@@ -55,7 +55,6 @@ namespace cfs
         void pwd();
         void copy(const std::vector<std::string> &vec);
         void move(const std::vector<std::string> &vec);
-        void symlink(const std::vector<std::string> &vec);
 
         /// turn path into vector
         static std::vector<std::string> path_to_vector(const std::string & path) noexcept;
