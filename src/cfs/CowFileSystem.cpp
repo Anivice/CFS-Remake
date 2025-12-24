@@ -353,18 +353,17 @@ namespace cfs
             if (result != 0) {
                 elog("getattr:", strerror(-result), "\n");
             } else {
-                const int fd = ::open(host_full_path.c_str(), O_WRONLY | O_CREAT | O_EXCL, 0600);
-                if (fd < 0) {
+                std::ofstream file (host_full_path.c_str());
+                if (!file) {
                     elog("open:", strerror(errno), "\n");
                 } else {
                     std::vector<char> data;
                     data.resize(1024 * 1024 * 16);
                     uint64_t offset = 0;
                     while (const auto rSize = do_read(cfs_path, data.data(), data.size(), offset)) {
-                        ::write(fd, data.data(), rSize);
+                        file.write(data.data(), rSize);
                         offset += rSize;
                     }
-                    close(fd);
                 }
             }
         }
