@@ -1196,6 +1196,33 @@ namespace cfs
         else if (vec.front() =="sync") {
             cfs_basic_filesystem_.sync();
         }
+        else if (vec.front() =="cat") {
+            if (vec.size() == 2) {
+                const auto cfs_path = path_calculator(vec[1]);
+                struct stat status {};
+                if (const int result = do_getattr(cfs_path, &status); result != 0) {
+                    elog("getattr:", strerror(-result), "\n");
+                }
+                else
+                {
+                    std::vector<char> data;
+                    data.resize(1024 * 1024 * 16);
+                    uint64_t offset = 0;
+                    while (const auto rSize = do_read(cfs_path, data.data(), data.size(), static_cast<off_t>(offset)))
+                    {
+                        if (rSize < 0) {
+                            elog("read:", strerror(-rSize), "\n");
+                            break;
+                        }
+
+                        ::write(STDOUT_FILENO, data.data(), rSize);
+                        offset += rSize;
+                    }
+                }
+            } else {
+                elog("del [CFS Path]\n");
+            }
+        }
 
 
         ////////////////////////////////////////////////////////

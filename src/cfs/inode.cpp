@@ -2,7 +2,10 @@
 
 void cfs::inode_t::save_dentry_unblocked()
 {
-    if (dentry_map_.empty()) return;
+    if (dentry_map_.empty()) {
+        referenced_inode_->resize(dentry_start_);
+        return;
+    }
     std::vector<uint8_t> buffer_;
     buffer_.clear();
     buffer_.reserve(dentry_map_.size() * 32);
@@ -47,10 +50,16 @@ void cfs::inode_t::read_dentry_unblocked()
     dentry_map_reversed_search_map_.clear();
     const auto inode_size = size_unblocked();
     const int64_t buffer_size = static_cast<int64_t>(inode_size) - static_cast<int64_t>(dentry_start_);
+
+    if (buffer_size == 0) {
+        return;
+    }
+
     if (inode_size < dentry_start_) {
         elog("dentry_start=", dentry_start_, ", but size is ", inode_size, "\n");
         return;
     }
+
     std::vector<uint8_t> buffer_(buffer_size, 0);
     const auto rSize = referenced_inode_->read(reinterpret_cast<char *>(buffer_.data()), buffer_.size(), dentry_start_);
     cfs_assert_simple(rSize == buffer_.size());

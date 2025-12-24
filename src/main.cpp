@@ -48,7 +48,15 @@ int main(int argc, char** argv)
         }
 
         /// No routes detected, utility mode
-        ilog("CFS utility version " CFS_IMPLEMENT_VERSION " (standard revision number " CFS_STANDARD_VERSION ")\n");
+        bool is_terminal = true;
+        struct stat st{};
+        if (fstat(STDOUT_FILENO, &st) == -1) {
+            is_terminal = false;
+        } else {
+            is_terminal = isatty(STDOUT_FILENO);
+        }
+
+        if (is_terminal) ilog("CFS utility version " CFS_IMPLEMENT_VERSION " (standard revision number " CFS_STANDARD_VERSION ")\n");
         const utils::PreDefinedArgumentType PreDefinedArguments(MainArgument);
         utils::ArgumentParser ArgumentParser(argc, argv, PreDefinedArguments);
         const auto parsed = ArgumentParser.parse();
