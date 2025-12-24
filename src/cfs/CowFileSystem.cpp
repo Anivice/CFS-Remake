@@ -153,7 +153,9 @@ namespace cfs
 {
     std::vector<std::string> CowFileSystem::ls_under_pwd_of_cfs(const std::string &)
     {
-        return {};
+        std::vector<std::string> vec;
+        do_readdir(cfs_pwd_, vec);
+        return vec;
     }
 
     void CowFileSystem::help()
@@ -306,6 +308,14 @@ namespace cfs
                 return;
             }
 
+            std::vector<std::pair < std::string, int > > titles = {
+                {"Name", utils::Right },
+                {"Size", utils::Left },
+                {"Time", utils::Left},
+            };
+
+            std::vector<std::vector < std::string > > vales;
+
             std::ranges::for_each(list, [&](const std::string & path_)
             {
                 const std::string tpath = path_calculator(path + "/" + path_);
@@ -315,8 +325,17 @@ namespace cfs
                     elog("Error: ", strerror(-result_getattr), " when reading attributes for ", path_, "\n");
                 }
 
-                std::cout << path_ << ((st.st_mode & S_IFMT) == S_IFDIR ? "/" : "") << std::endl;
+                struct timespec ts { };
+                timespec_get(&ts, TIME_UTC);
+                char buff[100] { };
+                strftime(buff, sizeof buff, "%D %T", gmtime(&ts.tv_sec));
+
+                std::vector<std::string> line;
+                utils::print(line, path_ + ((st.st_mode & S_IFMT) == S_IFDIR ? "/" : ""), utils::value_to_size(st.st_size), buff);
+                vales.emplace_back(line);
             });
+
+            utils::print_table(titles, vales, "Path: " + path);
         };
 
         if (vec.size() == 1) // no args
@@ -347,7 +366,7 @@ namespace cfs
         else
         {
             const auto cfs_path = path_calculator(vec[1]);
-            const auto host_full_path = vec[2];
+            const auto & host_full_path = vec[2];
             struct stat status {};
             const int result = do_getattr(cfs_path, &status);
             if (result != 0) {
@@ -360,7 +379,9 @@ namespace cfs
                     std::vector<char> data;
                     data.resize(1024 * 1024 * 16);
                     uint64_t offset = 0;
-                    while (const auto rSize = do_read(cfs_path, data.data(), data.size(), offset)) {
+                    while (const auto rSize = do_read(cfs_path, data.data(), data.size(),
+                        static_cast<int>(offset)))
+                    {
                         file.write(data.data(), rSize);
                         offset += rSize;
                     }
@@ -376,7 +397,7 @@ namespace cfs
         } else {
             const cfs::basic_io::mmap file(vec[1]); // test data
             const auto path = path_calculator(vec[2]);
-            do_fallocate(path, S_IFREG | 0755, 0, file.size());
+            do_fallocate(path, S_IFREG | 0755, 0, static_cast<int>(file.size()));
             do_write(path, file.data(), file.size(), 0);
         }
     }
@@ -408,7 +429,7 @@ namespace cfs
         return result;
     }
 
-    std::string CowFileSystem::path_calculator(const std::string &path) noexcept
+    std::string CowFileSystem::path_calculator(const std::string &path) const noexcept
     {
         if (!path.empty() && path.front() != '/') {
             const fs::path n = (fs::path(cfs_pwd_) / fs::path(path)).lexically_normal();
@@ -446,7 +467,11 @@ namespace cfs
                 }
 
                 const uint64_t index = ptr->second;
-                return std::make_pair<const uint64_t, const void *>(std::move(index), &parent);
+                std::pair < uint64_t, const void * > ret;
+                ret.first = index;
+                ret.second = &parent;
+
+                return ret;
             };
 
             for (const auto & entry : path)
@@ -522,7 +547,7 @@ namespace cfs
         GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_mkdir(const std::string & path, mode_t mode) noexcept
+    int CowFileSystem::do_mkdir(const std::string & path, const mode_t mode) noexcept
     {
         GENERAL_TRY() {
             auto vpath = path_to_vector(path);
@@ -645,7 +670,7 @@ namespace cfs
             const auto vpath = path_to_vector(path);
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
-            return child->read(buffer, size, offset);
+            return static_cast<int>(child->read(buffer, size, offset));
         }
         GENERAL_CATCH()
     }
@@ -657,7 +682,7 @@ namespace cfs
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
             child->set_mtime(utils::get_timespec());
-            return child->write(buffer, size, offset);
+            return static_cast<int>(child->write(buffer, size, offset));
         }
         GENERAL_CATCH()
     }
@@ -909,7 +934,7 @@ namespace cfs
         return status;
     }
 
-    std::string CowFileSystem::auto_path(const std::string & path)
+    std::string CowFileSystem::auto_path(const std::string & path) const
     {
         if (!path.empty() && path.front() == '/') {
             return path_calculator(path);

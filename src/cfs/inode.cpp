@@ -312,7 +312,7 @@ uint64_t cfs::inode_t::write(const char *data, const uint64_t size, const uint64
     return referenced_inode_->write(data, size, offset);
 }
 
-void cfs::inode_t::chdev(const int dev)
+void cfs::inode_t::chdev(const dev_t dev)
 {
     std::lock_guard lock(operation_mutex_);
     copy_on_write(); // relink
@@ -326,14 +326,14 @@ void cfs::inode_t::chrdev(const dev_t dev)
     return referenced_inode_->chrdev(dev);
 }
 
-void cfs::inode_t::chmod(const int mode)
+void cfs::inode_t::chmod(const mode_t mode)
 {
     std::lock_guard lock(operation_mutex_);
     copy_on_write(); // relink
     return referenced_inode_->chmod(mode);
 }
 
-void cfs::inode_t::chown(const int uid, const int gid)
+void cfs::inode_t::chown(const uid_t uid, const gid_t gid)
 {
     std::lock_guard lock(operation_mutex_);
     copy_on_write(); // relink

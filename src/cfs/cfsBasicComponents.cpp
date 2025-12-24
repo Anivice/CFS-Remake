@@ -869,7 +869,7 @@ void cfs::cfs_inode_service_t::resize(const uint64_t new_size)
     resize_unblocked(new_size);
 }
 
-void cfs::cfs_inode_service_t::chdev(const int dev)
+void cfs::cfs_inode_service_t::chdev(const dev_t dev)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_dev = dev;
@@ -881,13 +881,13 @@ void cfs::cfs_inode_service_t::chrdev(const dev_t dev)
     this->cfs_inode_attribute->st_rdev = dev;
 }
 
-void cfs::cfs_inode_service_t::chmod(const int mode)
+void cfs::cfs_inode_service_t::chmod(const mode_t mode)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_mode = mode;
 }
 
-void cfs::cfs_inode_service_t::chown(const int uid, const int gid)
+void cfs::cfs_inode_service_t::chown(const uid_t uid, const gid_t gid)
 {
     std::lock_guard<std::mutex> lock(mutex_);
     this->cfs_inode_attribute->st_uid = uid;

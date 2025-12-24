@@ -729,10 +729,10 @@ namespace cfs
         /// @param new_size New size
         void resize(uint64_t new_size);
 
-        void chdev(int dev);                // change st_dev
+        void chdev(dev_t dev);                // change st_dev
         void chrdev(dev_t dev);             // change st_rdev
-        void chmod(int mode);               // change st_mode
-        void chown(int uid, int gid);       // change st_uid, st_gid
+        void chmod(mode_t mode);               // change st_mode
+        void chown(uid_t uid, gid_t gid);       // change st_uid, st_gid
         void set_atime(timespec st_atim);   // change st_atim
         void set_ctime(timespec st_ctim);   // change st_ctim
         void set_mtime(timespec st_mtim);   // change st_mtim

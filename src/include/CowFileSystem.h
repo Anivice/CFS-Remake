@@ -35,9 +35,9 @@ namespace cfs
         /// wrapper for ls_pwd
         std::vector <std::string> ls_under_pwd_of_cfs(const std::string & /* type is always cfs */);
 
-        void help();
-        void help_at(const std::vector<std::string> &vec);
-        void version();
+        static void help();
+        static void help_at(const std::vector<std::string> &vec);
+        static void version();
 
         void debug_cat_ditmap();
         void debug_cat_journal();
@@ -48,13 +48,13 @@ namespace cfs
         void copy_from_host(const std::vector<std::string> &vec);
 
         /// turn path into vector
-        std::vector<std::string> path_to_vector(const std::string & path) noexcept;
+        static std::vector<std::string> path_to_vector(const std::string & path) noexcept;
 
         /// calculate relative path, if the provided one is a relative path
         /// and cancel out all the relative jumps like . and ..
         /// return a clean path
         /// @return clean path
-        std::string path_calculator(const std::string & path) noexcept;
+        std::string path_calculator(const std::string & path) const noexcept;
 
         using deferenced_pairs_t = struct {
             std::shared_ptr < inode_t > child;
@@ -75,7 +75,7 @@ namespace cfs
 
         deferenced_pairs_t deference_inode_from_path(vpath_t);
 
-        std::string auto_path(const std::string & path);
+        std::string auto_path(const std::string & path) const;
 
     public:
         /// get attributes from an inode by path

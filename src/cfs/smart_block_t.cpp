@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include "cfsBasicComponents.h"
 #include "CowFileSystem.h"
+#include "utils.h"
 
 void cfs::bitmap_base::init(const uint64_t required_blocks)
 {
@@ -115,99 +116,6 @@ static bool is_2_power_of(unsigned long long x)
     return false;
 }
 
-static void print_table(
-    const std::vector<std::pair < std::string, int > > & titles,
-    const std::vector<std::vector < std::string > > & vales,
-    const std::string & label)
-{
-
-    const auto [row, col] = cfs::utils::get_screen_row_col();
-    const auto max_available_per_col = (col - (titles.size() + 1)) / titles.size();
-    std::map < uint64_t, uint64_t > spaces;
-    bool use_max_avail = true;
-    auto find_max = [&](const auto & list, std::map < uint64_t, uint64_t > & spaces_)
-    {
-        cfs_assert_simple(list.size() == titles.size());
-        for (auto i = 0ul; i < list.size(); i++) {
-            if (list[i].length() > max_available_per_col) use_max_avail = false;
-            if (spaces_[i] < list[i].length()) spaces_[i] = list[i].length();
-        }
-    };
-
-    find_max(titles | std::views::keys, spaces);
-    std::ranges::for_each(vales, [&](const std::vector<std::string> & value){ find_max(value, spaces); });
-    if (use_max_avail) { std::ranges::for_each(spaces, [&](auto & value){ value.second = max_available_per_col; }); }
-
-    const std::string separator(col, '=');
-    {
-        const std::string left((col - (label.length() + 2)) / 2, '=');
-        const std::string right(col - left.length() - label.length() - 2, '=');
-        std::cout << left << " " << label << " " << right << std::endl;
-    }
-
-    std::vector<std::string> on_screen_content;
-    auto print = [&on_screen_content, &spaces, &col](const auto & values, const auto & justification)
-    {
-        uint64_t index = 0;
-        for (const auto & value : values)
-        {
-            std::ostringstream oss;
-            const auto max_len = spaces[index];
-            if (justification[index] == 1) // center
-            {
-                const auto left_len = std::max((max_len - value.length()) / 2, 0ul);
-                const auto right_len = std::max(max_len - left_len - value.length(), 0ul);
-                const std::string left(left_len, ' ');
-                const std::string right(right_len, ' ');
-                oss << left << value << right;
-            }
-            else if (justification[index] == 2) { // left
-                constexpr auto left_len = 1;
-                const auto right_len = std::max(static_cast<int>(max_len) - static_cast<int>(left_len) - static_cast<int>(value.length()), 0);
-                const std::string left(left_len, ' ');
-                const std::string right(right_len, ' ');
-                oss << left << value << right;
-            }
-            else if (justification[index] == 3) { // right
-                constexpr auto right_len = 1;
-                const auto left_len = std::max(static_cast<int>(max_len) - static_cast<int>(right_len) - static_cast<int>(value.length()), 0);
-                const std::string left(left_len, ' ');
-                const std::string right(right_len, ' ');
-                oss << left << value << right;
-            }
-            on_screen_content.push_back(oss.str());
-            index++;
-        }
-    };
-
-    auto show = [&]
-    {
-        int index = 0;
-        std::ostringstream oss;
-        std::ranges::for_each(on_screen_content, [&](const std::string & str) {
-            oss << "|" << str;
-            index++;
-        });
-        const auto before = oss.str().length();
-        oss << std::string(std::max(static_cast<int>(col) - static_cast<int>(before) - 1, 0), ' ') << "|";
-        std::cout << oss.str();
-    };
-
-    print(titles | std::views::keys, std::vector<int>(titles.size(), 1));
-    show(); on_screen_content.clear();
-    std::cout << std::endl;
-    if (col - 2 > 0) std::cout << "+" << std::string(col - 2, '-') << "+" << std::endl;
-
-    std::ranges::for_each(vales, [&](const std::vector<std::string> & value)
-    {
-        print(value, titles | std::views::values);
-        show(); on_screen_content.clear();
-        std::cout << std::endl;
-    });
-
-    std::cout << separator << std::endl;
-}
-
 #define gen_info(a, b) region_gen(a, b), blk_gen(a, b)
 
 /// Make a filesystem header
@@ -300,7 +208,7 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     printLine("DATA BLOCK", gen_info(head.static_info.data_table_start, head.static_info.data_table_end));
     printLine("JOURNAL REGION", gen_info(head.static_info.journal_start, head.static_info.journal_end));
     printLine("FILE SYSTEM HEAD BACKUP", gen_info(head.static_info.blocks - 1, head.static_info.blocks));
-    print_table(title, lines, "Disk Overview");
+    utils::print_table(title, lines, "Disk Overview");
     return head;
 }
 
@@ -318,7 +226,7 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     close(fd);
     ilog("Discarding finished\n");
     std::vector<uint8_t> empty_blk;
-    cfs_head_t head;
+    cfs_head_t head{};
     {
         basic_io::mmap file(path_to_block_file);
         assert_throw(file.size() >= cfs_minimum_size, "Disk too small");

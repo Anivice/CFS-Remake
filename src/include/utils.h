@@ -8,6 +8,7 @@
 #include "lz4.h"
 #include "cppcrc.h"
 #include <ctime>
+#include <sstream>
 
 /// Utilities
 namespace cfs::utils
@@ -75,6 +76,37 @@ namespace cfs::utils
     /// Return current timespec
     /// @return Current timespec
     timespec get_timespec() noexcept;
+
+    void print_table(
+        const std::vector<std::pair < std::string, int > > & titles,
+        const std::vector<std::vector < std::string > > & vales,
+        const std::string & label);
+
+    enum JustificationType : int { Center = 1, Left = 2, Right = 3 };
+
+    template < typename Arg > void _print(const Arg & arg, std::vector<std::string> & ret) {
+        std::stringstream ss;
+        ss << arg;
+        ret.push_back(ss.str());
+    }
+
+    template < typename ...Args >
+    void print(std::vector<std::string> & ret, const Args & ...arg) {
+        (_print(arg, ret), ...);
+    }
+
+    std::string value_to_human(unsigned long long value,
+        const std::string & lv1, const std::string & lv2,
+        const std::string & lv3, const std::string & lv4);
+
+    inline std::string value_to_speed(const unsigned long long value) {
+        return value_to_human(value, "B/s", "KB/s", "MB/s", "GB/s");
+    }
+
+    inline std::string value_to_size(const unsigned long long value) {
+        return value_to_human(value, "B", "KB", "MB", "GB");
+    }
+
 }
 
 #define NO_COPY_OBJ(name)                                       \

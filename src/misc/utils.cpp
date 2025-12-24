@@ -94,11 +94,120 @@ uint64_t cfs::utils::get_timestamp() noexcept
 
 timespec cfs::utils::get_timespec() noexcept
 {
-    timespec ts;
+    timespec ts{};
     timespec_get(&ts, TIME_UTC);
     return ts;
 }
 
+void cfs::utils::print_table(const std::vector<std::pair<std::string, int>> &titles,
+    const std::vector<std::vector<std::string>> &vales, const std::string &label)
+{
+
+    const auto [row, col] = cfs::utils::get_screen_row_col();
+    const auto max_available_per_col = (col - (titles.size() + 1)) / titles.size();
+    std::map < uint64_t, uint64_t > spaces;
+    bool use_max_avail = true;
+    auto find_max = [&](const auto & list, std::map < uint64_t, uint64_t > & spaces_)
+    {
+        cfs_assert_simple(list.size() == titles.size());
+        for (auto i = 0ul; i < list.size(); i++) {
+            if (list[i].length() > max_available_per_col) use_max_avail = false;
+            if (spaces_[i] < list[i].length()) spaces_[i] = list[i].length();
+        }
+    };
+
+    find_max(titles | std::views::keys, spaces);
+    std::ranges::for_each(vales, [&](const std::vector<std::string> & value){ find_max(value, spaces); });
+    if (use_max_avail) { std::ranges::for_each(spaces, [&](auto & value){ value.second = max_available_per_col; }); }
+
+    const std::string separator(col, '=');
+    {
+        const std::string left((col - (label.length() + 2)) / 2, '=');
+        const std::string right(col - left.length() - label.length() - 2, '=');
+        std::cout << left << " " << label << " " << right << std::endl;
+    }
+
+    std::vector<std::string> on_screen_content;
+    auto print = [&on_screen_content, &spaces, &col](const auto & values, const auto & justification)
+    {
+        uint64_t index = 0;
+        for (const auto & value : values)
+        {
+            std::ostringstream oss;
+            const auto max_len = spaces[index];
+            if (justification[index] == Center) // center
+            {
+                const auto left_len = std::max((max_len - value.length()) / 2, 0ul);
+                const auto right_len = std::max(max_len - left_len - value.length(), 0ul);
+                const std::string left(left_len, ' ');
+                const std::string right(right_len, ' ');
+                oss << left << value << right;
+            }
+            else if (justification[index] == Left) { // left
+                constexpr auto left_len = 1;
+                const auto right_len = std::max(static_cast<int>(max_len) - static_cast<int>(left_len) - static_cast<int>(value.length()), 0);
+                const std::string left(left_len, ' ');
+                const std::string right(right_len, ' ');
+                oss << left << value << right;
+            }
+            else if (justification[index] == Right) { // right
+                constexpr auto right_len = 1;
+                const auto left_len = std::max(static_cast<int>(max_len) - static_cast<int>(right_len) - static_cast<int>(value.length()), 0);
+                const std::string left(left_len, ' ');
+                const std::string right(right_len, ' ');
+                oss << left << value << right;
+            }
+            on_screen_content.push_back(oss.str());
+            index++;
+        }
+    };
+
+    auto show = [&]
+    {
+        int index = 0;
+        std::ostringstream oss;
+        std::ranges::for_each(on_screen_content, [&](const std::string & str) {
+            oss << "|" << str;
+            index++;
+        });
+        const auto before = oss.str().length();
+        oss << std::string(std::max(static_cast<int>(col) - static_cast<int>(before) - 1, 0), ' ') << "|";
+        std::cout << oss.str();
+    };
+
+    print(titles | std::views::keys, std::vector<int>(titles.size(), 1));
+    show(); on_screen_content.clear();
+    std::cout << std::endl;
+    if (col - 2 > 0) std::cout << "+" << std::string(col - 2, '-') << "+" << std::endl;
+
+    std::ranges::for_each(vales, [&](const std::vector<std::string> & value)
+    {
+        print(value, titles | std::views::values);
+        show(); on_screen_content.clear();
+        std::cout << std::endl;
+    });
+
+    std::cout << separator << std::endl;
+}
+
+std::string cfs::utils::value_to_human(
+    const unsigned long long value,
+    const std::string &lv1, const std::string &lv2,
+    const std::string &lv3, const std::string &lv4)
+{
+    std::stringstream ss;
+    if (value < 1024ull || value >= 1024ull * 1024ull * 1024ull * 1024ull * 1024ull) {
+        ss << value << " " << lv1;
+    } else if (value < 1024ull * 1024ull) {
+        ss << std::fixed << std::setprecision(2) << (static_cast<double>(value) / 1024ull) << " " << lv2;
+    } else if (value < 1024ull * 1024ull * 1024ull) {
+        ss << std::fixed << std::setprecision(2) << (static_cast<double>(value) / (1024ull * 1024ull)) << " " << lv3;
+    } else if (value < 1024ull * 1024ull * 1024ull * 1024ull) {
+        ss << std::fixed << std::setprecision(2) << (static_cast<double>(value) / (1024ull * 1024ull * 1024ull)) << " " << lv4;
+    }
+
+    return ss.str();
+}
 uint64_t cfs::utils::arithmetic::count_cell_with_cell_size(const uint64_t cell_size, const uint64_t particles)
 {
     assert_throw(cell_size != 0, "DIV/0");
@@ -139,24 +248,26 @@ std::vector<uint8_t> cfs::utils::arithmetic::compress(const std::vector<uint8_t>
     if (data.size() > LZ4_MAX_INPUT_SIZE) return { };
 
     std::vector < uint8_t > ret;
-    const int maxDst = LZ4_compressBound(data.size());   // worst-case bound
+    const int maxDst = LZ4_compressBound(static_cast<int>(data.size()));   // worst-case bound TODO: dentry list > 4GB?
     ret.resize(maxDst);
     const uint64_t data_size = data.size();
 
-    const int cSize = LZ4_compress_default((char*)data.data(), (char*)ret.data(), data.size(), maxDst);  // returns 0 on failure
+    const int cSize = LZ4_compress_default(reinterpret_cast<const char *>(data.data()),
+        reinterpret_cast<char *>(ret.data()), static_cast<int>(data.size()), maxDst);  // returns 0 on failure
     if (cSize == 0) { return { }; }
     ret.resize(cSize + sizeof(uint64_t));
-    *(uint64_t*)(ret.data() + cSize) = data_size;
+    *reinterpret_cast<uint64_t *>(ret.data() + cSize) = data_size;
     return ret;
 }
 
 std::vector<uint8_t> cfs::utils::arithmetic::decompress(const std::vector<uint8_t> & data) noexcept
 {
     std::vector < uint8_t > result;
-    const uint64_t * cSize = (uint64_t*)(data.data() + data.size() - sizeof(uint64_t));
+    const auto * cSize = reinterpret_cast<const uint64_t *>(data.data() + data.size() - sizeof(uint64_t));
     result.resize(*cSize);
-    const int dSize = LZ4_decompress_safe((char*)data.data(), (char*)result.data(),
-                                          data.size() - sizeof(uint64_t), *cSize);
+    const int dSize = LZ4_decompress_safe(reinterpret_cast<const char *>(data.data()), reinterpret_cast<char *>(result.data()),
+                                          static_cast<int>(data.size() - sizeof(uint64_t)),
+                                          static_cast<int>(*cSize));
     if (dSize < 0) return { };   // malformed input or dst too small
     return result;
 }
