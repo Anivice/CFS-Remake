@@ -369,14 +369,16 @@ namespace cfs
             const auto cfs_path = path_calculator(vec[1]);
             const auto & host_full_path = vec[2];
             struct stat status {};
-            const int result = do_getattr(cfs_path, &status);
-            if (result != 0) {
+            if (const int result = do_getattr(cfs_path, &status); result != 0) {
                 elog("getattr:", strerror(-result), "\n");
-            } else {
-                std::ofstream file (host_full_path.c_str());
-                if (!file) {
+            }
+            else
+            {
+                if (std::ofstream file (host_full_path.c_str()); !file) {
                     elog("open:", strerror(errno), "\n");
-                } else {
+                }
+                else
+                {
                     std::vector<char> data;
                     data.resize(1024 * 1024 * 16);
                     uint64_t offset = 0;
@@ -391,43 +393,150 @@ namespace cfs
         }
     }
 
+    void CowFileSystem::copy(const std::vector<std::string> &vec)
+    {
+        if (vec.size() != 3)
+        {
+            elog("copy [CFS Path] [CFS Path]\n");
+        }
+        else
+        {
+            const auto cfs_path_src = path_calculator(vec[1]);
+            const auto cfs_path_dest = path_calculator(vec[1]);
+            struct stat status {};
+            if (const int result = do_getattr(cfs_path_src, &status); result != 0) {
+                elog("getattr:", strerror(-result), "\n");
+            }
+            else
+            {
+                if (status.st_mode & S_IFREG)
+                {
+                    std::vector<char> data;
+                    data.resize(1024 * 1024 * 16);
+                    off_t offset = 0;
+                    if (const int alloc_result = do_fallocate(cfs_path_dest, S_IFREG | 0755, 0, status.st_size) != 0) {
+                        elog("fallocate:", strerror(-alloc_result), "\n");
+                        return;
+                    }
+
+                    while (const auto rSize = do_read(cfs_path_src, data.data(), data.size(), offset))
+                    {
+                        if (rSize < 0) {
+                            elog("read:", strerror(-rSize), "\n");
+                            return;
+                        }
+
+                        const int wSize = do_write(cfs_path_dest, data.data(), rSize, offset);
+
+                        if (wSize < 0) {
+                            elog("write:", strerror(-wSize), "\n");
+                            return;
+                        }
+
+                        if (wSize != rSize) {
+                            elog("Short write: size=", rSize, ", offset=", offset, "\n");
+                            return;
+                        }
+
+                        offset += rSize;
+                    }
+                }
+                else
+                {
+                    elog("Cannot copy a directory!\n");
+                }
+            }
+        }
+    }
+
     void CowFileSystem::copy_from_host(const std::vector<std::string> &vec)
     {
         if (vec.size() != 3) {
             elog("copy_from_host [Host Path] [CFS Path]\n");
-        } else {
+        }
+        else
+        {
             const cfs::basic_io::mmap file(vec[1]); // test data
             const auto path = path_calculator(vec[2]);
-            do_fallocate(path, S_IFREG | 0755, 0, static_cast<int>(file.size()));
-            do_write(path, file.data(), file.size(), 0);
+            if (const int alloc_result = do_fallocate(path, S_IFREG | 0755, 0, static_cast<off_t>(file.size())) != 0) {
+                elog("fallocate:", strerror(-alloc_result), "\n");
+                return;
+            }
+
+            if (file.size() != do_write(path, file.data(), file.size(), 0)) {
+                elog("Short write!\n");
+            }
         }
     }
 
     void CowFileSystem::mkdir(const std::vector<std::string> &vec)
     {
         if (vec.size() == 2) {
-            do_mkdir(vec[1], S_IFDIR | 0755);
+            do_mkdir(auto_path(vec[1]), S_IFDIR | 0755);
         } else {
-            elog("mkdir [CFS Path]");
+            elog("mkdir [CFS Path]\n");
         }
     }
 
     void CowFileSystem::rmdir(const std::vector<std::string> &vec)
     {
         if (vec.size() == 2) {
-            do_rmdir(vec[1]);
+            do_rmdir(auto_path(vec[1]));
         } else {
-            elog("rmdir [CFS Path]");
+            elog("rmdir [CFS Path]\n");
         }
     }
 
     void CowFileSystem::del(const std::vector<std::string> &vec)
     {
         if (vec.size() == 2) {
-            do_unlink(vec[1]);
+            do_unlink(auto_path(vec[1]));
         } else {
-            elog("del [CFS Path]");
+            elog("del [CFS Path]\n");
         }
+    }
+
+    void CowFileSystem::free()
+    {
+        const auto statvfs = do_fstat();
+        std::cout   << "CFS: "
+                    << utils::value_to_size(statvfs.f_bfree * statvfs.f_bsize) << " / "
+                    << utils::value_to_size(statvfs.f_blocks * statvfs.f_bsize) << " "
+                    << std::dec << std::fixed << std::setprecision(2)
+                    << static_cast<double>(statvfs.f_bfree * statvfs.f_bsize) / static_cast<double>(statvfs.f_blocks * statvfs.f_bsize) * 100
+                    << "%" << std::endl;
+    }
+
+    void CowFileSystem::cd(const std::vector<std::string> & vec)
+    {
+        if (vec.size() == 2)
+        {
+            const auto path = auto_path(vec[1]);
+            struct stat status {};
+            if (const int result = do_getattr(path, &status) != 0) {
+                elog("getattr:", strerror(-result), "\n");
+                return;
+            }
+
+            if (status.st_mode & S_IFDIR) {
+                cfs_pwd_ = path_calculator(path);
+            } else {
+                elog("Not a directory!\n");
+            }
+        } else {
+            cfs_pwd_ = "/";
+        }
+    }
+
+    void CowFileSystem::pwd()
+    {
+        std::cout << cfs_pwd_ << std::endl;
+    }
+
+    void CowFileSystem::move(const std::vector<std::string> &vec) {
+    }
+
+    void CowFileSystem::symlink(const std::vector<std::string> &vec) {
     }
 
     std::vector<std::string> CowFileSystem::path_to_vector(const std::string &path) noexcept
@@ -709,7 +818,7 @@ namespace cfs
         GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_read(const std::string &path, char *buffer, size_t size, off_t offset) noexcept
+    int CowFileSystem::do_read(const std::string &path, char *buffer, const size_t size, const off_t offset) noexcept
     {
         GENERAL_TRY() {
             const auto vpath = path_to_vector(path);
@@ -720,7 +829,7 @@ namespace cfs
         GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_write(const std::string &path, const char * buffer, size_t size, off_t offset) noexcept
+    int CowFileSystem::do_write(const std::string &path, const char * buffer, const size_t size, const off_t offset) noexcept
     {
         GENERAL_TRY() {
             const auto vpath = path_to_vector(path);
@@ -1063,14 +1172,14 @@ namespace cfs
         }
         else if (vec.front() =="copy") {
         }
+        else if (vec.front() =="cd") {
+            cd(vec);
+        }
+        else if (vec.front() =="pwd") {
+            pwd();
+        }
         else if (vec.front() =="free") {
-            const auto statvfs = do_fstat();
-            std::cout   << "CFS: "
-                        << utils::value_to_size(statvfs.f_bfree * statvfs.f_bsize) << " / "
-                        << utils::value_to_size(statvfs.f_blocks * statvfs.f_bsize) << " "
-                        << std::dec << std::fixed << std::setprecision(2)
-                        << static_cast<double>(statvfs.f_bfree * statvfs.f_bsize) / static_cast<double>(statvfs.f_blocks * statvfs.f_bsize) * 100
-                        << "%" << std::endl;
+            free();
         }
 
 

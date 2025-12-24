@@ -23,22 +23,23 @@
 
     # CFS file operations:
     < ls        (List everything under current PWD):                [CFSP]                  >,          # Implemented
-    < cd        (Change current PWD):                               [CFSP]                  >,
-    < pwd       (Show PWD):                                         [NONE]                  >,
+    < cd        (Change current PWD):                               [CFSP]                  >,          # Implemented
+    < pwd       (Show PWD):                                         [NONE]                  >,          # Implemented
 
     < copy_to_host      (Copy a file to host filesystem):           [CFSP],     [HSP]       >,          # Implemented
     < copytree_to_host  (Copy a file from host to CFS recursively): [CFSP],     [HSP]       >,
     < copy_from_host    (Copy a file from host to CFS):             [HSP],      [CFSP]      >,          # Implemented
     < copytree_from_host(Copy a file from host to CFS recursively): [HSP],      [CFSP]      >,
     < copy              (Copy a file):                              [CFSP],     [CFSP]      >,
-    < del               (Delete a file):                            [CFSP]                  >,
+    < move              (Move a file):                              [CFSP],     [CFSP]      >,
+    < del               (Delete a file):                            [CFSP]                  >,          # Implemented
     < deltree           (Delete recursively):                       [CFSP]                  >,
     < copytree          (Copy recursively):                         [CFSP],     [CFSP]      >,
     < symlink           (Create a symbol link):                     [CFSP],     [CFSP]      >,
-    < mkdir             (Create a directory):                       [CFSP]                  >,
-    < rmdir             (Remove a directory):                       [CFSP]                  >,
+    < mkdir             (Create a directory):                       [CFSP]                  >,          # Implemented
+    < rmdir             (Remove a directory):                       [CFSP]                  >,          # Implemented
     < tree              (DOS-like tree command):                    [CFSP]                  >,
-    < free              (Show filesystem usage):                    [CFSP]                  >,
+    < free              (Show filesystem usage):                    [CFSP]                  >,          # Implemented
 
     # debug options:
     < debug     (Debug commands):

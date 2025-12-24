@@ -50,6 +50,12 @@ namespace cfs
         void mkdir(const std::vector<std::string> &vec);
         void rmdir(const std::vector<std::string> &vec);
         void del(const std::vector<std::string> &vec);
+        void free();
+        void cd(const std::vector<std::string> &vec);
+        void pwd();
+        void copy(const std::vector<std::string> &vec);
+        void move(const std::vector<std::string> &vec);
+        void symlink(const std::vector<std::string> &vec);
 
         /// turn path into vector
         static std::vector<std::string> path_to_vector(const std::string & path) noexcept;
