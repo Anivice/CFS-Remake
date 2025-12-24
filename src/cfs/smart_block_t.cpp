@@ -118,6 +118,34 @@ static bool is_2_power_of(unsigned long long x)
 
 #define gen_info(a, b) region_gen(a, b), blk_gen(a, b)
 
+void cfs::cat_header(const cfs_head_t & head)
+{
+    auto region_gen = [](const uint64_t start, const uint64_t end) {
+        return "[" + std::to_string(start) + ", " + std::to_string(end) + ")";
+    };
+
+    auto blk_gen = [](const uint64_t start, const uint64_t end) {
+        return std::to_string(end - start) + " block" + (end - start > 1 ? "s" : "");
+    };
+
+    std::vector < std::vector < std::string > > lines;
+    std::vector<std::pair < std::string, int > > title = { { "Entry", 3 }, { "Region", 2 }, { "Block count", 2 } };
+    auto printLine = [&](const std::string & name, const std::string & line, const std::string & line2) {
+        lines.emplace_back(std::vector {name, line, line2});
+    };
+
+    printLine("Block size", std::to_string(head.static_info.block_size), "/");
+    printLine("Addressable region", gen_info(0, head.static_info.blocks));
+    printLine("FILE SYSTEM HEAD", gen_info(0, 1));
+    printLine("DATA REGION BITMAP", gen_info(head.static_info.data_bitmap_start, head.static_info.data_bitmap_end));
+    printLine("DATA BITMAP BACKUP", gen_info(head.static_info.data_bitmap_backup_start, head.static_info.data_bitmap_backup_end));
+    printLine("DATA BLOCK ATTRIBUTE", gen_info(head.static_info.data_block_attribute_table_start, head.static_info.data_block_attribute_table_end));
+    printLine("DATA BLOCK", gen_info(head.static_info.data_table_start, head.static_info.data_table_end));
+    printLine("JOURNAL REGION", gen_info(head.static_info.journal_start, head.static_info.journal_end));
+    printLine("FILE SYSTEM HEAD BACKUP", gen_info(head.static_info.blocks - 1, head.static_info.blocks));
+    cfs::utils::print_table(title, lines, "Disk Overview");
+}
+
 /// Make a filesystem header
 /// @param file_size Total disk size
 /// @param block_size Block size
@@ -185,30 +213,34 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     const auto now = utils::get_timestamp();
     head.runtime_info.mount_timestamp = head.runtime_info.last_check_timestamp = now;
 
-    auto region_gen = [](const uint64_t start, const uint64_t end) {
-        return "[" + std::to_string(start) + ", " + std::to_string(end) + ")";
-    };
+    head.runtime_info.allocated_non_cow_blocks = 1; // root
 
-    auto blk_gen = [](const uint64_t start, const uint64_t end) {
-        return std::to_string(end - start) + " block" + (end - start > 1 ? "s" : "");
-    };
-
-    std::vector < std::vector < std::string > > lines;
-    std::vector<std::pair < std::string, int > > title = { { "Entry", 3 }, { "Region", 2 }, { "Block count", 2 } };
-    auto printLine = [&](const std::string & name, const std::string & line, const std::string & line2) {
-        lines.emplace_back(std::vector {name, line, line2});
-    };
-
-    printLine("Block size", std::to_string(head.static_info.block_size), "/");
-    printLine("Addressable region", gen_info(0, head.static_info.blocks));
-    printLine("FILE SYSTEM HEAD", gen_info(0, 1));
-    printLine("DATA REGION BITMAP", gen_info(head.static_info.data_bitmap_start, head.static_info.data_bitmap_end));
-    printLine("DATA BITMAP BACKUP", gen_info(head.static_info.data_bitmap_backup_start, head.static_info.data_bitmap_backup_end));
-    printLine("DATA BLOCK ATTRIBUTE", gen_info(head.static_info.data_block_attribute_table_start, head.static_info.data_block_attribute_table_end));
-    printLine("DATA BLOCK", gen_info(head.static_info.data_table_start, head.static_info.data_table_end));
-    printLine("JOURNAL REGION", gen_info(head.static_info.journal_start, head.static_info.journal_end));
-    printLine("FILE SYSTEM HEAD BACKUP", gen_info(head.static_info.blocks - 1, head.static_info.blocks));
-    utils::print_table(title, lines, "Disk Overview");
+    cat_header(head);
+    //
+    // auto region_gen = [](const uint64_t start, const uint64_t end) {
+    //     return "[" + std::to_string(start) + ", " + std::to_string(end) + ")";
+    // };
+    //
+    // auto blk_gen = [](const uint64_t start, const uint64_t end) {
+    //     return std::to_string(end - start) + " block" + (end - start > 1 ? "s" : "");
+    // };
+    //
+    // std::vector < std::vector < std::string > > lines;
+    // std::vector<std::pair < std::string, int > > title = { { "Entry", 3 }, { "Region", 2 }, { "Block count", 2 } };
+    // auto printLine = [&](const std::string & name, const std::string & line, const std::string & line2) {
+    //     lines.emplace_back(std::vector {name, line, line2});
+    // };
+    //
+    // printLine("Block size", std::to_string(head.static_info.block_size), "/");
+    // printLine("Addressable region", gen_info(0, head.static_info.blocks));
+    // printLine("FILE SYSTEM HEAD", gen_info(0, 1));
+    // printLine("DATA REGION BITMAP", gen_info(head.static_info.data_bitmap_start, head.static_info.data_bitmap_end));
+    // printLine("DATA BITMAP BACKUP", gen_info(head.static_info.data_bitmap_backup_start, head.static_info.data_bitmap_backup_end));
+    // printLine("DATA BLOCK ATTRIBUTE", gen_info(head.static_info.data_block_attribute_table_start, head.static_info.data_block_attribute_table_end));
+    // printLine("DATA BLOCK", gen_info(head.static_info.data_table_start, head.static_info.data_table_end));
+    // printLine("JOURNAL REGION", gen_info(head.static_info.journal_start, head.static_info.journal_end));
+    // printLine("FILE SYSTEM HEAD BACKUP", gen_info(head.static_info.blocks - 1, head.static_info.blocks));
+    // utils::print_table(title, lines, "Disk Overview");
     return head;
 }
 
@@ -320,6 +352,13 @@ void cfs::filesystem::cfs_header_block_t::set(const cfs_head_t::runtime_info_t &
     // then, we load in
     fs_head->runtime_info = info;
     fs_end->runtime_info = info;
+}
+
+cfs::cfs_head_t cfs::filesystem::cfs_header_block_t::get_info()
+{
+    std::lock_guard lock(mtx_);
+    auto blk0 = parent_->lock(0);
+    return *fs_head;
 }
 
 void cfs::filesystem::block_shared_lock_t::lock(const uint64_t index)
@@ -470,10 +509,9 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
 cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
 {
     cfs_assert_simple(index < static_info_.blocks);
-    return cfs::filesystem::guard(
-        &this->bitlocker_,
+    return { &this->bitlocker_,
         this->file_.data() + index * static_info_.block_size,
-        index, static_info_.block_size);
+        index, static_info_.block_size };
 }
 
 cfs::filesystem::~filesystem() noexcept

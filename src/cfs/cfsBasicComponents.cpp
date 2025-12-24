@@ -294,6 +294,7 @@ uint64_t cfs::cfs_block_manager_t::allocate()
             .index_node_referencing_number = 1,
             .block_checksum = 0
         });
+        header_->inc<allocated_non_cow_blocks>();
     };
 
     auto refresh_allocate = [&](bool & success, const uint64_t start, const uint64_t end)
@@ -390,6 +391,9 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
     g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
 
     if (block_attribute_->get<index_node_referencing_number>(index) <= 1) {
+        if (block_attribute_->get<block_type>(index) != COW_REDUNDANCY_BLOCK) {
+            header_->dec<allocated_non_cow_blocks>(); // decrease non CoW blocks
+        }
         bitmap_->set_bit(index, false);
     } else {
         block_attribute_->dec<index_node_referencing_number>(index);
@@ -524,7 +528,6 @@ cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linear
 {
     auto alloc = [&](const uint8_t blk_type)->uint64_t
     {
-        parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
         const auto blk = block_manager_->allocate();
         block_attribute_->clear(blk,
          {
@@ -541,7 +544,6 @@ cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linear
 
     auto dealloc = [&](const uint64_t index)
     {
-        parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
         return block_manager_->deallocate(index);
     };
 
@@ -639,6 +641,7 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                 if (new_parent != parent_blk) {
                     if (block_attribute_->get<block_status>(parent_blk) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                         block_attribute_->set<block_type>(parent_blk, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+                        parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
                     } else {
                         block_attribute_->dec<index_node_referencing_number>(parent_blk);
                     }
@@ -768,7 +771,7 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, uint64_t size, const uint64
 uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint64_t size, const uint64_t offset, const bool hole_write)
 {
     bool success = false;
-    g_transaction(journal_, success, GlobalTransaction_Major_WriteInode, offset, size);
+    g_transaction(journal_, success, GlobalTransaction_Major_WriteInode, this->cfs_inode_attribute->st_ino, offset, size);
     if (this->cfs_inode_attribute->st_size < (size + offset)) {
         const auto old_ = this->cfs_inode_attribute->st_size;
         resize_unblocked(size + offset); // append when short
@@ -814,6 +817,7 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
         if (new_blk != index) {
             if (block_attribute_->get<block_status>(index) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                 block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+                parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
             } else {
                 block_attribute_->dec<index_node_referencing_number>(index);
             }

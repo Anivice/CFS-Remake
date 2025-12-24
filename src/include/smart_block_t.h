@@ -77,8 +77,11 @@ namespace cfs
     /// @param label disk label
     /// @return None
     /// @throws cfs::error::assertion_failed Can't do basic C operations
-    /// @throws cfs::error::cannot_discard_blocks Cannot discard blocks on block devices
     void make_cfs(const std::string &path_to_block_file, uint64_t block_size, const std::string & label);
+
+    /// show header info
+    /// @param head Filesystem header
+    void cat_header(const cfs_head_t & head);
 
     template < typename F> concept DestroyCallBackFunction = requires(F f, const uint64_t c) {
         { std::invoke(f, c) } -> std::same_as<void>;
@@ -180,6 +183,9 @@ namespace cfs
                     || std::is_same_v<Type, snapshot_number_cow>
                     || std::is_same_v<Type, flags>)
             uint64_t get_info();
+
+            /// get header info (full entry)
+            cfs_head_t get_info();
 
             /// set header entry
             template < typename Type >

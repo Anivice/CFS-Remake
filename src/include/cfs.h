@@ -78,7 +78,12 @@ namespace cfs
         STORAGE_BLOCK = 0x03,
     };
 
-    enum BlockAttribute_BlockType : uint8_t { CowRedundancy = 0x00, IndexNode = 0x01, PointerBlock = 0x02, StorageBlock = 0x03 };
+    enum BlockAttribute_BlockType : uint8_t {
+        CowRedundancy = 0x00,
+        IndexNode = 0x01,
+        PointerBlock = 0x02,
+        StorageBlock = 0x03
+    };
 
     constexpr uint64_t cfs_block_attribute_size = 4;
     struct cfs_block_attribute_t {

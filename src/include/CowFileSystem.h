@@ -42,10 +42,14 @@ namespace cfs
         void debug_cat_ditmap();
         void debug_cat_journal();
         void debug_cat_attribute(const std::vector<std::string> &vec);
+        void debug_cat_head();
         void debug_check_hash5();
         void ls(const std::vector<std::string> &vec);
         void copy_to_host(const std::vector<std::string> &vec);
         void copy_from_host(const std::vector<std::string> &vec);
+        void mkdir(const std::vector<std::string> &vec);
+        void rmdir(const std::vector<std::string> &vec);
+        void del(const std::vector<std::string> &vec);
 
         /// turn path into vector
         static std::vector<std::string> path_to_vector(const std::string & path) noexcept;

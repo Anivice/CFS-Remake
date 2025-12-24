@@ -125,6 +125,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
 
             if (inode_construct_info_.block_attribute->get<block_status>(old_) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                 inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+                inode_construct_info_.parent_fs_governor->cfs_header_block.dec<allocated_non_cow_blocks>();
             } else {
                 inode_construct_info_.block_attribute->dec<index_node_referencing_number>(old_);
             }
@@ -141,6 +142,7 @@ void cfs::inode_t::root_cow()
     std::vector<uint8_t> data_;
     // create a new block
     const auto new_inode_num_ = inode_construct_info_.block_manager->allocate();
+    inode_construct_info_.parent_fs_governor->cfs_header_block.inc<allocated_non_cow_blocks>();
     // set attributes
     inode_construct_info_.block_attribute->clear(new_inode_num_, {
                                                      .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
@@ -226,6 +228,7 @@ void cfs::inode_t::root_cow()
     inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
     if (inode_construct_info_.block_attribute->get<block_status>(old_) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
         inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+        inode_construct_info_.parent_fs_governor->cfs_header_block.dec<allocated_non_cow_blocks>();
     } else {
         inode_construct_info_.block_attribute->dec<index_node_referencing_number>(old_);
     }
@@ -248,6 +251,7 @@ uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index
 
         // copy over
         const auto new_block = inode_construct_info_.block_manager->allocate();
+        inode_construct_info_.parent_fs_governor->cfs_header_block.inc<allocated_non_cow_blocks>();
         const auto new_lock = referenced_inode_->lock_page(new_block);
         cfs_assert_simple(content.size() == static_info_->block_size);
         std::memcpy(new_lock->data(), content.data(), content.size());

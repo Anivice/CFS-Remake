@@ -245,6 +245,11 @@ namespace cfs
         std::cout << print_attribute(*(uint32_t*)&attr) << std::endl;
     }
 
+    void CowFileSystem::debug_cat_head()
+    {
+        cat_header(cfs_basic_filesystem_.cfs_header_block.get_info());
+    }
+
     void CowFileSystem::debug_check_hash5()
     {
         auto putc = [](const int status)
@@ -395,6 +400,33 @@ namespace cfs
             const auto path = path_calculator(vec[2]);
             do_fallocate(path, S_IFREG | 0755, 0, static_cast<int>(file.size()));
             do_write(path, file.data(), file.size(), 0);
+        }
+    }
+
+    void CowFileSystem::mkdir(const std::vector<std::string> &vec)
+    {
+        if (vec.size() == 2) {
+            do_mkdir(vec[1], S_IFDIR | 0755);
+        } else {
+            elog("mkdir [CFS Path]");
+        }
+    }
+
+    void CowFileSystem::rmdir(const std::vector<std::string> &vec)
+    {
+        if (vec.size() == 2) {
+            do_rmdir(vec[1]);
+        } else {
+            elog("rmdir [CFS Path]");
+        }
+    }
+
+    void CowFileSystem::del(const std::vector<std::string> &vec)
+    {
+        if (vec.size() == 2) {
+            do_unlink(vec[1]);
+        } else {
+            elog("del [CFS Path]");
         }
     }
 
@@ -965,7 +997,7 @@ namespace cfs
         const struct statvfs status {
             .f_bsize = cfs_basic_filesystem_.static_info_.block_size,
             .f_frsize = cfs_basic_filesystem_.static_info_.block_size,
-            .f_blocks = cfs_basic_filesystem_.static_info_.blocks,
+            .f_blocks = cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start,
             .f_bfree = free,
             .f_bavail = free,
             .f_files = 0,
@@ -1021,30 +1053,24 @@ namespace cfs
             copy_from_host(vec);
         }
         else if (vec.front() =="mkdir") {
-            if (vec.size() == 2) {
-                do_mkdir(vec[1], S_IFDIR | 0755);
-            } else {
-                elog("mkdir [CFS Path]");
-            }
+            mkdir(vec);
         }
         else if (vec.front() =="rmdir") {
-            if (vec.size() == 2) {
-                do_rmdir(vec[1]);
-            } else {
-                elog("rmdir [CFS Path]");
-            }
+            rmdir(vec);
         }
         else if (vec.front() =="del") {
-            if (vec.size() == 2) {
-                do_unlink(vec[1]);
-            } else {
-                elog("del [CFS Path]");
-            }
+            del(vec);
         }
         else if (vec.front() =="copy") {
         }
         else if (vec.front() =="free") {
-
+            const auto statvfs = do_fstat();
+            std::cout   << "CFS: "
+                        << utils::value_to_size(statvfs.f_bfree * statvfs.f_bsize) << " / "
+                        << utils::value_to_size(statvfs.f_blocks * statvfs.f_bsize) << " "
+                        << std::dec << std::fixed << std::setprecision(2)
+                        << static_cast<double>(statvfs.f_bfree * statvfs.f_bsize) / static_cast<double>(statvfs.f_blocks * statvfs.f_bsize) * 100
+                        << "%" << std::endl;
         }
 
 
@@ -1060,6 +1086,9 @@ namespace cfs
                 }
                 else if (vec[2] == "journal") {
                     debug_cat_journal();
+                }
+                else if (vec[2] == "header") {
+                    debug_cat_head();
                 }
                 else if (vec[2] == "attribute" && vec.size() == 4) {
                     debug_cat_attribute(vec);
