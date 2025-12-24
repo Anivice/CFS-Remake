@@ -66,6 +66,12 @@ namespace cfs
         /// @return New inode index, you should immediately switch your reference if inode index changes
         uint64_t copy_on_write_invoked_from_child(uint64_t cow_index, const std::vector<uint8_t> & content);
 
+        /// get struct stat
+        [[nodiscard]] struct stat get_stat_unblocked() const { return this->referenced_inode_->get_stat(); }
+
+        /// Return inode content size
+        uint64_t size_unblocked() const { return referenced_inode_->cfs_inode_attribute->st_size; }
+
     public:
         NO_COPY_OBJ(inode_t)
 
@@ -113,12 +119,23 @@ namespace cfs
         void set_mtime(timespec st_mtim);   // change st_mtim
 
         /// get struct stat
-        [[nodiscard]] struct stat get_stat() const { return this->referenced_inode_->get_stat(); }
+        [[nodiscard]] struct stat get_stat();
 
         /// Return inode content size
-        uint64_t size() const { return referenced_inode_->cfs_inode_attribute->st_size; }
+        uint64_t size();
 
         virtual ~inode_t() = default;
+
+        void freeze_all_active_blocks()
+        {
+            for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
+            {
+                if (inode_construct_info_.block_manager->blk_at(i)) {
+                    inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
+                    inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
+                }
+            }
+        }
     };
 
     class file_t : public inode_t {
@@ -148,6 +165,12 @@ namespace cfs
     };
 
     class dentry_t : public inode_t {
+    private:
+        /// create an inode under current dentry
+        /// @param name Inode dentry name
+        /// @return New inode
+        template < class InodeType > InodeType make_inode_unblocked(const std::string & name);
+
     public:
         NO_COPY_OBJ(dentry_t)
 
@@ -159,20 +182,12 @@ namespace cfs
         /// @param block_attribute
         /// @param parent_inode Parent inode, always dentry_t
         dentry_t(
-            const uint64_t index,
+            uint64_t index,
             filesystem * parent_fs_governor,
             cfs_block_manager_t * block_manager,
             cfs_journaling_t * journal,
             cfs_block_attribute_access_t * block_attribute,
-            inode_t * parent_inode)
-        : inode_t(index, parent_fs_governor, block_manager, journal, block_attribute, parent_inode)
-        {
-            if (inode_type() != S_IFDIR) {
-                throw error::cannot_initialize_dentry_on_non_dentry_inodes();
-            }
-            std::lock_guard lock(operation_mutex_);
-            read_dentry_unblocked();
-        }
+            inode_t * parent_inode);
 
         using dentry_pairs_t = tsl::hopscotch_map<std::string, uint64_t>;
 
@@ -183,27 +198,8 @@ namespace cfs
         /// @param name Inode name
         void unlink(const std::string & name);
 
-        uint64_t erase_entry(const std::string & name)
-        {
-            std::lock_guard lock(operation_mutex_);
-            const auto ptr = dentry_map_.find(name);
-            cfs_assert_simple (ptr != dentry_map_.end());
-            const auto inode = ptr->second;
-            dentry_map_.erase(ptr);
-            dentry_map_reversed_search_map_.erase(inode);
-            save_dentry_unblocked();
-            return inode;
-        }
-
-        void add_entry(const std::string & name, const uint64_t index)
-        {
-            std::lock_guard lock(operation_mutex_);
-            const auto ptr = dentry_map_.find(name);
-            cfs_assert_simple (ptr == dentry_map_.end());
-            dentry_map_.emplace(name, index);
-            dentry_map_reversed_search_map_.emplace(index, name);
-            save_dentry_unblocked();
-        }
+        uint64_t erase_entry(const std::string & name);
+        void add_entry(const std::string & name, uint64_t index);
 
         /// create an inode under current dentry
         /// @param name Inode dentry name
@@ -212,90 +208,100 @@ namespace cfs
         InodeType make_inode(const std::string & name)
         {
             std::lock_guard<std::mutex> lock(operation_mutex_);
-            const auto ptr = dentry_map_.find(name);
-            cfs_assert_simple (ptr == dentry_map_.end());
-            copy_on_write(); // relink
-            const auto new_index = inode_construct_info_.block_manager->allocate();
-            // clear inode data
-            {
-                inode_construct_info_.block_attribute->clear(new_index, {
-                    .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-                    .block_type = INDEX_NODE_BLOCK,
-                    .block_type_cow = 0,
-                    .allocation_oom_scan_per_refresh_count = 0,
-                    .newly_allocated_thus_no_cow = 0,
-                    .index_node_referencing_number = 1,
-                    .block_checksum = 0
-                });
-                const auto new_lock = inode_construct_info_.parent_fs_governor->lock(new_index + static_info_->data_table_start);
-                std::memset(new_lock.data(), 0, new_lock.size());
-                const auto now = utils::get_timespec();
-                struct stat inode_stat{};
-                if constexpr (std::is_same_v<InodeType, dentry_t>)
-                {
-                    inode_stat = {
-                        .st_dev = 0,
-                        .st_ino = new_index,
-                        .st_nlink = 1,
-                        .st_mode = S_IFDIR | 0755,
-                        .st_uid = getuid(),
-                        .st_gid = getgid(),
-                        .st_rdev = 0,
-                        .st_size = 0,
-                        .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
-                        .st_blocks = 0,
-                        .st_atim = now,
-                        .st_mtim = now,
-                        .st_ctim = now,
-                    };
-                }
-                else if constexpr (std::is_same_v<InodeType, file_t>) {
-                    inode_stat = {
-                        .st_dev = 0,
-                        .st_ino = new_index,
-                        .st_nlink = 1,
-                        .st_mode = S_IFREG | 0755,
-                        .st_uid = getuid(),
-                        .st_gid = getgid(),
-                        .st_rdev = 0,
-                        .st_size = 0,
-                        .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
-                        .st_blocks = 0,
-                        .st_atim = now,
-                        .st_mtim = now,
-                        .st_ctim = now,
-                    };
-                }
-                else if constexpr (std::is_same_v<InodeType, inode_t>) {
-                    inode_stat = {
-                        .st_dev = 0,
-                        .st_ino = new_index,
-                        .st_nlink = 1,
-                        .st_mode = S_IFREG | 0755,
-                        .st_uid = getuid(),
-                        .st_gid = getgid(),
-                        .st_rdev = 0,
-                        .st_size = 0,
-                        .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
-                        .st_blocks = 0,
-                        .st_atim = now,
-                        .st_mtim = now,
-                        .st_ctim = now,
-                    };
-                }
-                std::memcpy(new_lock.data(), &inode_stat, sizeof(inode_stat)); // new inode struct stat
-            }
-
-            this->dentry_map_.emplace(name, new_index);
-            this->dentry_map_reversed_search_map_.emplace(new_index, name);
-            save_dentry_unblocked();
-
-            return InodeType(new_index,
-                    inode_construct_info_.parent_fs_governor, inode_construct_info_.block_manager,
-                    inode_construct_info_.journal, inode_construct_info_.block_attribute,
-                    this);
+            return make_inode_unblocked<InodeType>(name);
         }
+
+        /// Create a snapshot
+        /// @param name snapshot name
+        void snapshot(const std::string & name);
     };
+
+    template<class InodeType>
+    InodeType dentry_t::make_inode_unblocked(const std::string &name)
+    {
+        const auto ptr = dentry_map_.find(name);
+        cfs_assert_simple (ptr == dentry_map_.end());
+        copy_on_write(); // relink
+        const auto new_index = inode_construct_info_.block_manager->allocate();
+        // clear inode data
+        {
+            inode_construct_info_.block_attribute->clear(new_index, {
+                                                             .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+                                                             .block_type = INDEX_NODE_BLOCK,
+                                                             .block_type_cow = 0,
+                                                             .allocation_oom_scan_per_refresh_count = 0,
+                                                             .newly_allocated_thus_no_cow = 0,
+                                                             .index_node_referencing_number = 1,
+                                                             .block_checksum = 0
+                                                         });
+            const auto new_lock = inode_construct_info_.parent_fs_governor->lock(new_index + static_info_->data_table_start);
+            std::memset(new_lock.data(), 0, new_lock.size());
+            const auto now = utils::get_timespec();
+            struct stat inode_stat{};
+            if constexpr (std::is_same_v<InodeType, dentry_t>)
+            {
+                inode_stat = {
+                    .st_dev = 0,
+                    .st_ino = new_index,
+                    .st_nlink = 1,
+                    .st_mode = S_IFDIR | 0755,
+                    .st_uid = getuid(),
+                    .st_gid = getgid(),
+                    .st_rdev = 0,
+                    .st_size = 0,
+                    .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
+                    .st_blocks = 0,
+                    .st_atim = now,
+                    .st_mtim = now,
+                    .st_ctim = now,
+                };
+            }
+            else if constexpr (std::is_same_v<InodeType, file_t>) {
+                inode_stat = {
+                    .st_dev = 0,
+                    .st_ino = new_index,
+                    .st_nlink = 1,
+                    .st_mode = S_IFREG | 0755,
+                    .st_uid = getuid(),
+                    .st_gid = getgid(),
+                    .st_rdev = 0,
+                    .st_size = 0,
+                    .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
+                    .st_blocks = 0,
+                    .st_atim = now,
+                    .st_mtim = now,
+                    .st_ctim = now,
+                };
+            }
+            else if constexpr (std::is_same_v<InodeType, inode_t>) {
+                inode_stat = {
+                    .st_dev = 0,
+                    .st_ino = new_index,
+                    .st_nlink = 1,
+                    .st_mode = S_IFREG | 0755,
+                    .st_uid = getuid(),
+                    .st_gid = getgid(),
+                    .st_rdev = 0,
+                    .st_size = 0,
+                    .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
+                    .st_blocks = 0,
+                    .st_atim = now,
+                    .st_mtim = now,
+                    .st_ctim = now,
+                };
+            }
+            std::memcpy(new_lock.data(), &inode_stat, sizeof(inode_stat)); // new inode struct stat
+        }
+
+        this->dentry_map_.emplace(name, new_index);
+        this->dentry_map_reversed_search_map_.emplace(new_index, name);
+        save_dentry_unblocked();
+
+        return InodeType(new_index,
+                         inode_construct_info_.parent_fs_governor, inode_construct_info_.block_manager,
+                         inode_construct_info_.journal, inode_construct_info_.block_attribute,
+                         this);
+    }
 }
 
 #endif //CFS_INODE_H

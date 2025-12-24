@@ -529,8 +529,7 @@ namespace cfs
             cfs_bitmap_block_mirroring_t * bitmap,
             filesystem::cfs_header_block_t * header,
             cfs_block_attribute_access_t * block_attribute,
-            cfs_journaling_t * journal
-            );
+            cfs_journaling_t * journal);
 
         /// allocate a new block
         /// @return New block index
@@ -541,7 +540,11 @@ namespace cfs
         /// @param index Block index
         void deallocate(uint64_t index);
 
-        std::vector<uint8_t> dump_bitmap_data() { return bitmap_->dump(); }
+        /// dump bitmap data
+        [[nodiscard]] std::vector<uint8_t> dump_bitmap_data() const { return bitmap_->dump(); }
+
+        /// get allocation status of a block
+        [[nodiscard]] bool blk_at(const uint64_t index) const { return bitmap_->get_bit(index); }
     };
 
     template < typename F> concept Allocator_ = requires(F f, const uint8_t c) { { std::invoke(f, c) } -> std::same_as<uint64_t>; };

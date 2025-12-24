@@ -421,13 +421,14 @@ cfs::cfs_inode_service_t::page_locker_t cfs::cfs_inode_service_t::lock_page(cons
     if (!linker && block_attribute_->get<block_type>(index) == POINTER_BLOCK) {
         throw cfs::error::assertion_failed("Attempt to read pointer without stating as linker");
     }
-    return page_locker_t(index, parent_fs_governor_, this);
+    return {index, parent_fs_governor_, this};
 }
 
 uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const bool linker)
 {
     cfs_assert_simple(index != block_index_); // can't CoW on my own. this should be done by dentry
-    if (!block_attribute_->get<newly_allocated_thus_no_cow>(index))
+    if (!block_attribute_->get<newly_allocated_thus_no_cow>(index)
+        || block_attribute_->get<block_status>(index) != BLOCK_AVAILABLE_TO_MODIFY_0x00)
     {
         bool success = false;
         const auto new_block = block_manager_->allocate();
@@ -636,7 +637,11 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                 std::memcpy(parent_blk_lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
                 block_attribute_->set<newly_allocated_thus_no_cow>(parent_blk, 0);
                 if (new_parent != parent_blk) {
-                    block_attribute_->set<block_type>(parent_blk, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+                    if (block_attribute_->get<block_status>(parent_blk) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                        block_attribute_->set<block_type>(parent_blk, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+                    } else {
+                        block_attribute_->dec<index_node_referencing_number>(parent_blk);
+                    }
                 }
             }
 
@@ -807,7 +812,11 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
         const auto lock = lock_page(new_blk);
         copy_to_buffer(lock->data() + w_off, w_size);
         if (new_blk != index) {
-            block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+            if (block_attribute_->get<block_status>(index) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
+            } else {
+                block_attribute_->dec<index_node_referencing_number>(index);
+            }
         }
     };
 

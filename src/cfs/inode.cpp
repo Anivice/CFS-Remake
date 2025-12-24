@@ -13,7 +13,7 @@ void cfs::inode_t::save_dentry_unblocked()
         }
     };
 
-    for (const auto [string, inode] : dentry_map_)
+    for (const auto & [string, inode] : dentry_map_)
     {
         for (const auto c : string) { buffer_.push_back(c); }
         buffer_.push_back(0); // null terminated string TODO: DO NOT ALLOW ANY CREATION OF NULL TERMINATED DENTRY NAME
@@ -21,7 +21,7 @@ void cfs::inode_t::save_dentry_unblocked()
     }
 
     auto compressed = utils::arithmetic::compress(buffer_);
-    const uint64_t size = *(uint64_t*)(compressed.data() + compressed.size() - sizeof(uint64_t));
+    const uint64_t size = *reinterpret_cast<uint64_t *>(compressed.data() + compressed.size() - sizeof(uint64_t));
     compressed.resize(compressed.size() - sizeof(uint64_t));
     buffer_.clear();
     buffer_.reserve(size + sizeof(cfs_magick_number) + sizeof(uint64_t));
@@ -35,14 +35,14 @@ void cfs::inode_t::save_dentry_unblocked()
 
 void cfs::inode_t::read_dentry_unblocked()
 {
-    if (size() < sizeof(uint64_t)) {
+    if (size_unblocked() < sizeof(uint64_t)) {
         return;
     }
 
     referenced_inode_->read((char*)&dentry_start_, sizeof(dentry_start_), 0);
     dentry_map_.clear();
     dentry_map_reversed_search_map_.clear();
-    std::vector<uint8_t> buffer_(size() - dentry_start_, 0);
+    std::vector<uint8_t> buffer_(size_unblocked() - dentry_start_, 0);
     const auto rSize = referenced_inode_->read((char*)buffer_.data(), buffer_.size(), dentry_start_);
     cfs_assert_simple(rSize == buffer_.size());
 
@@ -121,7 +121,12 @@ void cfs::inode_t::copy_on_write() // CoW entry
                                                                       inode_construct_info_.block_attribute); // relocate reference
             referenced_inode_->cfs_inode_attribute->st_ino = current_referenced_inode_;
             inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
-            inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+
+            if (inode_construct_info_.block_attribute->get<block_type>(old_) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+            } else {
+                inode_construct_info_.block_attribute->dec<index_node_referencing_number>(old_);
+            }
         }
     }
     else
@@ -222,13 +227,18 @@ void cfs::inode_t::root_cow()
 
     // change old to redundancy
     inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
-    inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+    if (inode_construct_info_.block_attribute->get<block_type>(old_) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+        inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
+    } else {
+        inode_construct_info_.block_attribute->dec<index_node_referencing_number>(old_);
+    }
 }
 
 uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index, const std::vector<uint8_t> &content)
 {
     /// check if child needs a reference
-    if (!inode_construct_info_.block_attribute->get<newly_allocated_thus_no_cow>(cow_index))
+    if (!inode_construct_info_.block_attribute->get<newly_allocated_thus_no_cow>(cow_index)
+        || inode_construct_info_.block_attribute->get<block_type>(cow_index) != BLOCK_AVAILABLE_TO_MODIFY_0x00)
     {
         // now, we start to change current dentry reference
         const auto ptr = dentry_map_reversed_search_map_.find(cow_index);
@@ -361,6 +371,34 @@ void cfs::inode_t::set_mtime(const timespec st_mtim)
     return referenced_inode_->set_atime(st_mtim);
 }
 
+uint64_t cfs::inode_t::size()
+{
+    std::lock_guard lock(operation_mutex_);
+    return size_unblocked();
+}
+
+struct stat cfs::inode_t::get_stat()
+{
+    std::lock_guard lock(operation_mutex_);
+    return get_stat_unblocked();
+}
+
+cfs::dentry_t::dentry_t(
+    const uint64_t index,
+    filesystem *parent_fs_governor,
+    cfs_block_manager_t *block_manager,
+    cfs_journaling_t *journal,
+    cfs_block_attribute_access_t *block_attribute,
+    inode_t *parent_inode)
+: inode_t(index, parent_fs_governor, block_manager, journal, block_attribute, parent_inode)
+{
+    if (inode_type() != S_IFDIR) {
+        throw error::cannot_initialize_dentry_on_non_dentry_inodes();
+    }
+    std::lock_guard lock(operation_mutex_);
+    read_dentry_unblocked();
+}
+
 cfs::dentry_t::dentry_pairs_t cfs::dentry_t::ls()
 {
     // updated from disk and should change sync with the memory so, just read memory
@@ -393,4 +431,48 @@ void cfs::dentry_t::unlink(const std::string & name)
             inode_construct_info_.block_attribute);
     target.resize(0); // remove all data in inode pointers
     inode_construct_info_.block_manager->deallocate(inode_pointer); // remove child inode
+}
+
+uint64_t cfs::dentry_t::erase_entry(const std::string &name)
+{
+    std::lock_guard lock(operation_mutex_);
+    const auto ptr = dentry_map_.find(name);
+    cfs_assert_simple (ptr != dentry_map_.end());
+    const auto inode = ptr->second;
+    dentry_map_.erase(ptr);
+    dentry_map_reversed_search_map_.erase(inode);
+    save_dentry_unblocked();
+    return inode;
+}
+
+void cfs::dentry_t::add_entry(const std::string &name, const uint64_t index)
+{
+    std::lock_guard lock(operation_mutex_);
+    const auto ptr = dentry_map_.find(name);
+    cfs_assert_simple (ptr == dentry_map_.end());
+    dentry_map_.emplace(name, index);
+    dentry_map_reversed_search_map_.emplace(index, name);
+    save_dentry_unblocked();
+}
+
+void cfs::dentry_t::snapshot(const std::string &name)
+{
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    cfs_assert_simple(parent_inode_ == nullptr);
+    bool success = false;
+    g_transaction(inode_construct_info_.journal, success, GlobalTransaction_Major_SnapshotCreation);
+
+
+    uint64_t new_inode_index = 0;
+    {
+        auto new_inode = make_inode_unblocked<dentry_t>(name);
+        std::vector<uint8_t> root_raw_dump(referenced_inode_->get_stat().st_size);
+        referenced_inode_->read(reinterpret_cast<char *>(root_raw_dump.data()), root_raw_dump.size(), 0);
+        new_inode.write(reinterpret_cast<char *>(root_raw_dump.data()), root_raw_dump.size(), 0);
+        new_inode_index = new_inode.current_referenced_inode_;
+    }
+
+    inode_construct_info_.block_attribute->set<block_status>(new_inode_index,
+                                                             BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
+    freeze_all_active_blocks();
 }

@@ -1,7 +1,5 @@
 #include "CowFileSystem.h"
-#include "args.h"
 #include "cfs.h"
-#include "routes.h"
 #include "readline.h"
 #include "history.h"
 #include "smart_block_t.h"
@@ -28,7 +26,7 @@
 
 std::string print_attribute(const uint32_t val)
 {
-    const auto * attr_ = (cfs::cfs_block_attribute_t *)&val;
+    const auto * attr_ = reinterpret_cast<const cfs::cfs_block_attribute_t *>(&val);
     const auto & attr = *attr_;
     std::stringstream ss;
     ss << "     Status:             ";
@@ -947,10 +945,12 @@ namespace cfs
     {
         if (vec.empty()) return true;
 
+        //////////////////////////////////////////////////////////
+        //////////////////// GENERAL COMMANDS ////////////////////
+        //////////////////////////////////////////////////////////
         if (vec.front() == "quit" || vec.front() == "exit") {
             return false;
         }
-
         if (vec.front() == "help") {
             help();
         }
@@ -960,6 +960,10 @@ namespace cfs
         else if (vec.front() == "version") {
             version();
         }
+
+        //////////////////////////////////////////////////////
+        //////////////////// CFS COMMANDS ////////////////////
+        //////////////////////////////////////////////////////
         else if (vec.front() == "ls") {
             ls(vec);
         }
@@ -969,6 +973,23 @@ namespace cfs
         else if (vec.front() =="copy_from_host") {
             copy_from_host(vec);
         }
+        else if (vec.front() =="mkdir") {
+            copy_from_host(vec);
+        }
+        else if (vec.front() =="rmdir") {
+            copy_from_host(vec);
+        }
+        else if (vec.front() =="del") {
+            copy_from_host(vec);
+        }
+        else if (vec.front() =="copy") {
+            copy_from_host(vec);
+        }
+
+
+        ////////////////////////////////////////////////////////
+        //////////////////// DEBUG COMMANDS ////////////////////
+        ////////////////////////////////////////////////////////
         else if (vec.front() == "debug" && vec.size() >= 2)
         {
             if (vec[1] == "cat" && vec.size() >= 3)
