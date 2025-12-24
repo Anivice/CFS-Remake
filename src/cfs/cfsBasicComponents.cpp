@@ -742,7 +742,7 @@ uint64_t cfs::cfs_inode_service_t::read(char * data, uint64_t size, const uint64
     // read first page
     {
         const auto lock1 = lock_page(level3[skipped_blocks]);
-        copy_to_buffer(lock1->data(), bytes_to_read_in_the_first_block);
+        copy_to_buffer(lock1->data() + skipped_bytes, bytes_to_read_in_the_first_block);
     }
 
     // read continuous
@@ -796,7 +796,7 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
         global_write_offset += r_size;
     };
 
-    auto cow_write = [&](const uint64_t index, const uint64_t w_size)
+    auto cow_write = [&](const uint64_t index, const uint64_t w_size, const uint64_t w_off)
     {
         const auto new_blk = copy_on_write(index);
         if (new_blk != index) {
@@ -805,7 +805,7 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
         }
 
         const auto lock = lock_page(new_blk);
-        copy_to_buffer(lock->data(), w_size);
+        copy_to_buffer(lock->data() + w_off, w_size);
         if (new_blk != index) {
             block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
         }
@@ -827,24 +827,24 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
     // write first page
     {
         const auto target_blk = level3[skipped_blocks];
-        cow_write(target_blk, bytes_to_write_in_the_first_block);
+        cow_write(target_blk, bytes_to_write_in_the_first_block, skipped_bytes);
     }
 
     // write continuous
     for (uint64_t i = 1; i <= adjacent_full_blocks; i++) {
         const auto target_blk = level3[skipped_blocks + i];
-        cow_write(target_blk, block_size_);
+        cow_write(target_blk, block_size_, 0);
     }
 
     // write tail
     if (bytes_to_write_in_the_last_block != 0) {
         const auto target_blk = level3[skipped_blocks + adjacent_full_blocks + 1];
-        cow_write(target_blk, bytes_to_write_in_the_last_block);
+        cow_write(target_blk, bytes_to_write_in_the_last_block, 0);
     }
 
     if (!relink_map.empty())
     {
-        decltype(allocation_descriptor.level3_pointers) level3_pointers = allocation_descriptor.level3_pointers;
+        // decltype(allocation_descriptor.level3_pointers) level3_pointers = allocation_descriptor.level3_pointers;
 
         // relink all level 3 blocks
         std::ranges::for_each(allocation_descriptor.level3_pointers, [&](std::pair <uint64_t, bool> & ptr)

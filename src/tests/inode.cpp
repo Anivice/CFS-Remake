@@ -34,11 +34,11 @@ int main(int argc, char ** argv)
         raid1_bitmap.set_bit(0, true); // mark 0 as allocated
         raid1_bitmap.set_bit(1, true);
         block_attribute.set<cfs::block_type>(1, cfs::INDEX_NODE_BLOCK);
-        cfs::inode_t inode(0, &fs, &block_manager, &journal, &block_attribute, nullptr);
-        inode.resize(0);
+        cfs::cfs_inode_service_t inode(0, &fs, &block_manager, &journal, &block_attribute);
+        inode.resize(6);
         inode.write("123", 3, 0);
         inode.write("456", 3, 3);
-        std::vector<char> data (inode.size());
+        std::vector<char> data (6);
         inode.read(data.data(), data.size(), 0);
         std::ranges::for_each(data, [](const char c){ std::cout << c; });
         std::cout << std::endl;

@@ -358,7 +358,7 @@ namespace cfs
                     elog("open:", strerror(errno), "\n");
                 } else {
                     std::vector<char> data;
-                    data.resize(4096);
+                    data.resize(1024 * 1024 * 16);
                     uint64_t offset = 0;
                     while (const auto rSize = do_read(cfs_path, data.data(), data.size(), offset)) {
                         ::write(fd, data.data(), rSize);

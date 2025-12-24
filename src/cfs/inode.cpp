@@ -29,8 +29,8 @@ void cfs::inode_t::save_dentry_unblocked()
     save_bytes(cfs_magick_number);
     save_bytes(size);
     buffer_.insert(buffer_.end(), compressed.begin(), compressed.end());
-    referenced_inode_->resize(dentry_start_ + buffer_.size() + sizeof(dentry_start_));
-    referenced_inode_->write((char*)buffer_.data(), buffer_.size(), dentry_start_ + sizeof(dentry_start_));
+    referenced_inode_->resize(dentry_start_ + buffer_.size());
+    referenced_inode_->write((char*)buffer_.data(), buffer_.size(), dentry_start_);
 }
 
 void cfs::inode_t::read_dentry_unblocked()
@@ -44,13 +44,13 @@ void cfs::inode_t::read_dentry_unblocked()
     dentry_map_reversed_search_map_.clear();
     std::vector<uint8_t> buffer_(size() - dentry_start_, 0);
     const auto rSize = referenced_inode_->read((char*)buffer_.data(), buffer_.size(), dentry_start_);
+    cfs_assert_simple(rSize == buffer_.size());
 
     bool found = false;
-    const uint64_t * magic = (uint64_t*)buffer_.data();
+    const char * magic = (char*)buffer_.data();
     for (uint64_t i = 0; i < (buffer_.size() - 8); i++)
     {
-        if (*magic == cfs_magick_number) {
-            dentry_start_ = i;
+        if (*(uint64_t*)(magic+i) == cfs_magick_number) {
             found = true;
             break;
         }
@@ -61,7 +61,7 @@ void cfs::inode_t::read_dentry_unblocked()
     }
 
     // decompress expects size to be at the end of the stream
-    const auto cSize = buffer_.begin() + dentry_start_ + sizeof(cfs_magick_number);
+    const auto cSize = buffer_.begin() + sizeof(cfs_magick_number);
     std::vector dentry_data_(cSize + sizeof(uint64_t), buffer_.end());
     dentry_data_.insert(dentry_data_.end(), cSize, cSize + sizeof(uint64_t));
 
