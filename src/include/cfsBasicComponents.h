@@ -239,6 +239,10 @@ namespace cfs
             || std::is_same_v<Type, block_checksum>)
         void set(uint64_t index, uint32_t value);
 
+        /// move value
+        /// @tparam Type1 From
+        /// @tparam Type2 To
+        /// @param index Block Index
         template < typename Type1, typename Type2 >
         requires (
                std::is_same_v<Type1, block_status>
@@ -267,7 +271,18 @@ namespace cfs
             || std::is_same_v<Type, index_node_referencing_number>)
         void dec(uint64_t index, uint32_t value = 1);
 
-        void clear(const uint64_t index, const cfs_block_attribute_t & value = { }) { *lock(index) = value; }
+        void clear(const uint64_t index, const cfs_block_attribute_t & value = { })
+        {
+            auto lock_ = lock(index);
+
+            if (value.block_type == COW_REDUNDANCY_BLOCK && lock_->block_type != COW_REDUNDANCY_BLOCK) {
+                this->parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
+            } else if (value.block_type != COW_REDUNDANCY_BLOCK && lock_->block_type == COW_REDUNDANCY_BLOCK) {
+                this->parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
+            }
+
+            *lock_ = value;
+        }
         friend class smart_lock_t;
     };
 
@@ -327,6 +342,12 @@ namespace cfs
             lock_->block_status = value;
         }
         else if constexpr (std::is_same_v<Type, block_type>) {
+            if (value == COW_REDUNDANCY_BLOCK && lock_->block_type != COW_REDUNDANCY_BLOCK) {
+                this->parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
+            } else if (value != COW_REDUNDANCY_BLOCK && lock_->block_type == COW_REDUNDANCY_BLOCK) {
+                this->parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
+            }
+
             lock_->block_type = value;
         }
         else if constexpr (std::is_same_v<Type, block_type_cow>) {

@@ -209,14 +209,16 @@ namespace cfs
 
             if (mirrored_bitmap_.get_bit(i))
             {
-                switch (const auto attr = block_attribute_.get<block_type>(i))
-                {
-                    case CowRedundancy:
-                        std::cout << color::bg_color(1,1,1);
-                        show_bit(block_attribute_.get<block_type_cow>(i));
-                        break;
-                    default:
-                        show_bit(attr);
+                const auto attr = block_attribute_.get(i);
+                if (attr.block_type == CowRedundancy) {
+                    std::cout << color::bg_color(1,1,1);
+                    show_bit(block_attribute_.get<block_type_cow>(i));
+                }
+                else {
+                    if (attr.block_status != BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                        std::cout << color::bg_color(0,5,5);
+                    }
+                    show_bit(attr.block_type);
                 }
             } else {
                 std::cout << ".";
@@ -247,7 +249,31 @@ namespace cfs
 
     void CowFileSystem::debug_cat_head()
     {
-        cat_header(cfs_basic_filesystem_.cfs_header_block.get_info());
+        const auto head = cfs_basic_filesystem_.cfs_header_block.get_info();
+        cat_header(head);
+        std::vector<std::pair < std::string, int > > titles = {
+            {"Entry", utils::Right },
+            {"Data", utils::Left },
+        };
+
+        std::vector<std::vector < std::string > > vales;
+
+        auto printLine = [&](const std::string & entry, uint64_t value)->void
+        {
+            std::vector<std::string> line;
+            utils::print(line, entry, std::to_string(value));
+            vales.emplace_back(line);
+        };
+
+        printLine("mount_timestamp", head.runtime_info.mount_timestamp);
+        printLine("last_check_timestamp", head.runtime_info.last_check_timestamp);
+        printLine("snapshot_number", head.runtime_info.snapshot_number);
+        printLine("snapshot_number_cow", head.runtime_info.snapshot_number_cow);
+        printLine("clean", head.runtime_info.flags.clean);
+        printLine("last_allocated_block", head.runtime_info.last_allocated_block);
+        printLine("allocated_non_cow_blocks", head.runtime_info.allocated_non_cow_blocks);
+        printLine("root_inode_pointer", head.runtime_info.root_inode_pointer);
+        utils::print_table(titles, vales, "Runtime Information");
     }
 
     void CowFileSystem::debug_check_hash5()

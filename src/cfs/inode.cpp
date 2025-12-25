@@ -131,11 +131,10 @@ void cfs::inode_t::copy_on_write() // CoW entry
                                                                       inode_construct_info_.journal,
                                                                       inode_construct_info_.block_attribute); // relocate reference
             referenced_inode_->cfs_inode_attribute->st_ino = current_referenced_inode_;
-            inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
 
             if (inode_construct_info_.block_attribute->get<block_status>(old_) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
                 inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
-                inode_construct_info_.parent_fs_governor->cfs_header_block.dec<allocated_non_cow_blocks>();
             } else {
                 inode_construct_info_.block_attribute->dec<index_node_referencing_number>(old_);
             }
@@ -235,10 +234,9 @@ void cfs::inode_t::root_cow()
     referenced_inode_->cfs_inode_attribute->st_ino = new_inode_num_;
 
     // change old to redundancy
-    inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
     if (inode_construct_info_.block_attribute->get<block_status>(old_) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+        inode_construct_info_.block_attribute->move<block_type, block_type_cow>(old_);
         inode_construct_info_.block_attribute->set<block_type>(old_, COW_REDUNDANCY_BLOCK);
-        inode_construct_info_.parent_fs_governor->cfs_header_block.dec<allocated_non_cow_blocks>();
     } else {
         inode_construct_info_.block_attribute->dec<index_node_referencing_number>(old_);
     }
@@ -681,6 +679,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         target_index = dentry.current_referenced_inode_; // update reference
     }
 
+    inode_construct_info_.block_attribute->move<block_type, block_type_cow>(target_index); // backup block type
     inode_construct_info_.block_attribute->set<block_type>(target_index, COW_REDUNDANCY_BLOCK); // set that as redundancy
 
     // remove corresponding link as well
@@ -699,5 +698,6 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         }
     }
 
+    inode_construct_info_.parent_fs_governor->cfs_header_block.set_info<allocated_non_cow_blocks>(non_cow_blocks);
     inode_construct_info_.parent_fs_governor->sync(); // sync
 }
