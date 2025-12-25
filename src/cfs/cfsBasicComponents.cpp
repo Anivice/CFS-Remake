@@ -338,7 +338,9 @@ uint64_t cfs::cfs_block_manager_t::allocate()
             {
                 if (bitmap_->get_bit(i))
                 {
-                    if (block_attribute_->get<block_type>(i) == CowRedundancy) {
+                    if (const auto attr = block_attribute_->get(i);
+                        attr.block_type == CowRedundancy || attr.index_node_referencing_number == 0)
+                    {
                         const auto refresh = block_attribute_->get<allocation_oom_scan_per_refresh_count>(i);
                         if (oldest < refresh) oldest = refresh;
                         scanned_cow_blocks[i] = refresh;

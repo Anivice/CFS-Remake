@@ -39,7 +39,10 @@
     < rmdir             (Remove a directory):                       [CFSP]                  >,          # Implemented
     < tree              (DOS-like tree command):                    [CFSP]                  >,
     < free              (Show filesystem usage):                    [CFSP]                  >,          # Implemented
-    < sync              (Synchronize filesystem):                   [NONE]                  >,
+    < sync              (Synchronize filesystem):                   [NONE]                  >,          # Implemented
+    < snapshot          (Snapshot the filesystem):                  [NONE]                  >,          # Implemented
+    < revert            (Revert filesystem to a snapshot state):    [NONE]                  >,          # Implemented
+    < delsnapshot       (Delete a snapshot of the filesystem):      [NONE]                  >,          # Implemented
 
     # debug options:
     < debug     (Debug commands):

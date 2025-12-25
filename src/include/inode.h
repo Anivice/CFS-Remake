@@ -99,7 +99,7 @@ namespace cfs
         /// @param size read size
         /// @param offset read offset
         /// @return size read
-        virtual uint64_t read(char * data, uint64_t size, uint64_t offset);
+        uint64_t read(char * data, uint64_t size, uint64_t offset);
 
         /// write to inode data.
         /// write automatically resizes when offset+size > st_size, but will not shrink.
@@ -108,7 +108,7 @@ namespace cfs
         /// @param size write size
         /// @param offset write offset
         /// @return size written
-        virtual uint64_t write(const char * data, uint64_t size, uint64_t offset);
+        uint64_t write(const char * data, uint64_t size, uint64_t offset);
 
         void chdev(dev_t dev);                // change st_dev
         void chrdev(dev_t dev);             // change st_rdev
@@ -125,17 +125,6 @@ namespace cfs
         uint64_t size();
 
         virtual ~inode_t() = default;
-
-        void freeze_all_active_blocks()
-        {
-            for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
-            {
-                if (inode_construct_info_.block_manager->blk_at(i)) {
-                    inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
-                    inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
-                }
-            }
-        }
     };
 
     class file_t : public inode_t {

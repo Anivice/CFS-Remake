@@ -556,6 +556,35 @@ namespace cfs
         }
     }
 
+    void CowFileSystem::cat(const std::vector<std::string> &vec)
+    {
+        if (vec.size() == 2) {
+            const auto cfs_path = path_calculator(vec[1]);
+            struct stat status {};
+            if (const int result = do_getattr(cfs_path, &status); result != 0) {
+                elog("getattr: ", strerror(-result), "\n");
+            }
+            else
+            {
+                std::vector<char> data;
+                data.resize(1024 * 1024 * 16);
+                uint64_t offset = 0;
+                while (const auto rSize = do_read(cfs_path, data.data(), data.size(), static_cast<off_t>(offset)))
+                {
+                    if (rSize < 0) {
+                        elog("read: ", strerror(-rSize), "\n");
+                        break;
+                    }
+
+                    ::write(STDOUT_FILENO, data.data(), rSize);
+                    offset += rSize;
+                }
+            }
+        } else {
+            elog("del [CFS Path]\n");
+        }
+    }
+
     std::vector<std::string> CowFileSystem::path_to_vector(const std::string &path) noexcept
     {
         std::vector<std::string> result;
@@ -722,10 +751,9 @@ namespace cfs
             child.reset();
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR) {
                 auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
-                const auto list = dentry.ls();
 
                 // see if target exists
-                if (list.find(target) != list.end()) {
+                if (const auto list = dentry.ls(); list.find(target) != list.end()) {
                     return -EEXIST;
                 }
 
@@ -782,6 +810,9 @@ namespace cfs
             child.reset();
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR) {
                 auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                if (const auto list = dentry.ls(); list.find(target) != list.end()) {
+                    return -EEXIST;
+                }
                 auto inode = dentry.make_inode<inode_t>(target);
                 inode.chmod(mode | S_IFREG);
                 return 0;
@@ -988,14 +1019,68 @@ namespace cfs
         GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_snapshot(const std::string &name) noexcept
+    int CowFileSystem::do_snapshot(const std::string & name) noexcept
     {
-        return -ENOSYS;
+        GENERAL_TRY() {
+            auto [child, parents] = deference_inode_from_path(path_to_vector("/"));
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                if (const auto list = dentry.ls(); list.find(name) != list.end()) {
+                    return -EEXIST;
+                }
+
+                dentry.snapshot(name);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_rollback(const std::string &name) noexcept
+    int CowFileSystem::do_rollback(const std::string & name) noexcept
     {
-        return -ENOSYS;
+        GENERAL_TRY() {
+            auto [child, parents] = deference_inode_from_path(path_to_vector("/"));
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                if (const auto list = dentry.ls(); list.find(name) == list.end()) {
+                    return -ENOENT;
+                }
+                dentry.revert(name);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
+    }
+
+    int CowFileSystem::do_cleanup(const std::string &name) noexcept
+    {
+        GENERAL_TRY() {
+            auto [child, parents] = deference_inode_from_path(path_to_vector("/"));
+            const auto child_stat = child->get_stat();
+            child.reset();
+            if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                if (const auto list = dentry.ls(); list.find(name) == list.end()) {
+                    return -ENOENT;
+                }
+                dentry.delete_snapshot(name);
+                return 0;
+            }
+
+            return -ENOTDIR;
+        }
+        GENERAL_CATCH()
     }
 
     int CowFileSystem::do_rename(const std::string &path, const std::string &new_path) noexcept
@@ -1205,30 +1290,33 @@ namespace cfs
             cfs_basic_filesystem_.sync();
         }
         else if (vec.front() =="cat") {
+            cat(vec);
+        }
+        else if (vec.front() =="snapshot") {
             if (vec.size() == 2) {
-                const auto cfs_path = path_calculator(vec[1]);
-                struct stat status {};
-                if (const int result = do_getattr(cfs_path, &status); result != 0) {
-                    elog("getattr: ", strerror(-result), "\n");
-                }
-                else
-                {
-                    std::vector<char> data;
-                    data.resize(1024 * 1024 * 16);
-                    uint64_t offset = 0;
-                    while (const auto rSize = do_read(cfs_path, data.data(), data.size(), static_cast<off_t>(offset)))
-                    {
-                        if (rSize < 0) {
-                            elog("read: ", strerror(-rSize), "\n");
-                            break;
-                        }
-
-                        ::write(STDOUT_FILENO, data.data(), rSize);
-                        offset += rSize;
-                    }
+                if (const int result = do_snapshot(vec[1]); result != 0) {
+                    elog("snapshot: ", strerror(result), "\n");
                 }
             } else {
-                elog("del [CFS Path]\n");
+                elog("snapshot [Name]\n");
+            }
+        }
+        else if (vec.front() =="revert") {
+            if (vec.size() == 2) {
+                if (const int result = do_rollback(vec[1]); result != 0) {
+                    elog("rollback: ", strerror(result), "\n");
+                }
+            } else {
+                elog("rollback [Name]\n");
+            }
+        }
+        else if (vec.front() =="delsnapshot") {
+            if (vec.size() == 2) {
+                if (const int result = do_cleanup(vec[1]); result != 0) {
+                    elog("cleanup: ", strerror(result), "\n");
+                }
+            } else {
+                elog("cleanup [Name]\n");
             }
         }
 

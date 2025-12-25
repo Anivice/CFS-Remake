@@ -55,6 +55,7 @@ namespace cfs
         void pwd();
         void copy(const std::vector<std::string> &vec);
         void move(const std::vector<std::string> &vec);
+        void cat(const std::vector<std::string> &vec);
 
         /// turn path into vector
         static std::vector<std::string> path_to_vector(const std::string & path) noexcept;
@@ -84,7 +85,7 @@ namespace cfs
 
         deferenced_pairs_t deference_inode_from_path(vpath_t);
 
-        std::string auto_path(const std::string & path) const;
+        [[nodiscard]] std::string auto_path(const std::string & path) const;
 
     public:
         /// get attributes from an inode by path
@@ -207,6 +208,11 @@ namespace cfs
         /// @param name snapshot name
         /// @return 0 means good, negative + errno means error
         int do_rollback(const std::string & name) noexcept;
+
+        /// Remove a snapshot
+        /// @param name snapshot name
+        /// @return 0 means good, negative + errno means error
+        int do_cleanup(const std::string & name) noexcept;
 
         /// Relink an inode
         /// @param path Old path
