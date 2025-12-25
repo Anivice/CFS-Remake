@@ -147,6 +147,17 @@ target_include_directories(cfs PRIVATE ${CMAKE_BINARY_DIR})
 target_include_directories(cfs_obj PRIVATE ${CMAKE_BINARY_DIR})
 add_dependencies(cfs_obj version.txt cfs.command.readline)
 
+# Add libfuse
+if ("${BUILD_FUSE}" STREQUAL "True")
+    include(FindPkgConfig)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBFUSE REQUIRED fuse)
+    target_compile_definitions(cfs PRIVATE "_FILE_OFFSET_BITS=64" "CFS_COMPILE_FUSE=1")
+    target_include_directories(cfs PRIVATE ${LIBFUSE_INCLUDE_DIRS})
+    target_compile_options(cfs PRIVATE ${LIBFUSE_CFLAGS_OTHER})
+    target_link_libraries(cfs PRIVATE ${LIBFUSE_LIBRARIES})
+endif ()
+
 function(add_link LINK)
     add_custom_target(utility_links_${LINK} ALL
             DEPENDS cfs
