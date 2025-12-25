@@ -494,14 +494,17 @@ void cfs::dentry_t::snapshot(const std::string &name)
     cfs_assert_simple(parent_inode_ == nullptr);
     bool success = false;
     g_transaction(inode_construct_info_.journal, success, GlobalTransaction_Major_SnapshotCreation);
+    std::vector<uint8_t> root_raw_dump;
+    uint64_t old_dentry_start_ = 0;
 
     uint64_t new_inode_index = 0;
     {
         auto new_inode = make_inode_unblocked<dentry_t>(name);
-        std::vector<uint8_t> root_raw_dump(referenced_inode_->get_stat().st_size);
+        root_raw_dump.resize(referenced_inode_->get_stat().st_size);
         referenced_inode_->read(reinterpret_cast<char *>(root_raw_dump.data()), root_raw_dump.size(), 0);
         new_inode.write(reinterpret_cast<char *>(root_raw_dump.data()), root_raw_dump.size(), 0);
         new_inode_index = new_inode.current_referenced_inode_;
+        old_dentry_start_ = dentry_start_;
     }
 
     // force CoW updates from now on
@@ -559,7 +562,37 @@ void cfs::dentry_t::snapshot(const std::string &name)
             if (attr.block_status == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                 inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
             }
-            inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
+            if (attr.block_type != COW_REDUNDANCY_BLOCK) {
+                inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
+            }
+        }
+    }
+
+    std::vector<uint8_t> per_snapshot_fs_info(old_dentry_start_ - sizeof(uint64_t));
+    std::memcpy(per_snapshot_fs_info.data(), root_raw_dump.data() + sizeof(uint64_t), old_dentry_start_ - sizeof(uint64_t));
+    auto decompressed_data = cfs::utils::arithmetic::decompress(per_snapshot_fs_info);
+
+    // fix discrepancies
+    const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
+    class per_snapshot_bitmap_t : public bitmap_base {
+    public:
+        explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
+        {
+            init_data_array = [&](const uint64_t)->bool
+            {
+                data_array_ = data;
+                return true;
+            };
+
+            init(size);
+        }
+    } per_snapshot_bitmap(decompressed_data.data(), // bitmap start
+        map_size); // particles. bytes are calculated automatically
+
+    for (uint64_t i = 0; i < map_size; i++)
+    {
+        if (inode_construct_info_.block_manager->blk_at(i) && !per_snapshot_bitmap.get_bit(i)) {
+            wlog("discrepancies: ", i, "\n");
         }
     }
 
@@ -577,17 +610,16 @@ void cfs::dentry_t::revert(const std::string &name)
     cfs_assert_simple(ptr != dentry_map_.end());
 
     // remove all post snapshot changes
-    for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++) {
-        if (inode_construct_info_.block_attribute->get<block_status>(i) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
-            inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i);
-            inode_construct_info_.block_attribute->set<block_type>(i, COW_REDUNDANCY_BLOCK);
-        }
-    }
-
-    // we will remove a root, that means everyone has one less snapshot inode reference
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
-        if (inode_construct_info_.block_manager->blk_at(i)) {
+        if (inode_construct_info_.block_manager->blk_at(i))
+        {
+            if (inode_construct_info_.block_attribute->get<block_status>(i) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i);
+                inode_construct_info_.block_attribute->set<block_type>(i, COW_REDUNDANCY_BLOCK);
+            }
+
+            // we will remove a root, that means everyone has one less snapshot inode reference
             inode_construct_info_.block_attribute->dec<index_node_referencing_number>(i);
         }
     }
@@ -667,7 +699,6 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         dentry.read((char*)per_snapshot_fs_info.data(), per_snapshot_fs_info.size(), sizeof(uint64_t));
 
         auto decompressed_data = cfs::utils::arithmetic::decompress(per_snapshot_fs_info);
-
         const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
 
         // venture and iterate through the whole system
