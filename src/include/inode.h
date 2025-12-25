@@ -214,6 +214,12 @@ namespace cfs
         /// Create a snapshot
         /// @param name snapshot name
         void snapshot(const std::string & name);
+
+        /// Revert to a snapshot
+        /// @param name snapshot name
+        void revert(const std::string & name);
+
+        void delete_snapshot(const std::string & name);
     };
 
     template<class InodeType>

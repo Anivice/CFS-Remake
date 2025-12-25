@@ -124,6 +124,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
         {
             const auto old_ = current_referenced_inode_;
             current_referenced_inode_ = new_inode_num_; // get new inode
+            referenced_inode_.reset();
             referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
                                                                       inode_construct_info_.parent_fs_governor,
                                                                       inode_construct_info_.block_manager,
@@ -172,6 +173,7 @@ void cfs::inode_t::root_cow()
 
     const auto old_ = current_referenced_inode_;
     current_referenced_inode_ = new_inode_num_; // get new inode
+    referenced_inode_.reset();
     referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
                                                               inode_construct_info_.parent_fs_governor,
                                                               inode_construct_info_.block_manager,
@@ -467,11 +469,11 @@ void cfs::dentry_t::add_entry(const std::string &name, const uint64_t index)
 
 void cfs::dentry_t::snapshot(const std::string &name)
 {
+    copy_on_write();
     std::lock_guard<std::mutex> lock(operation_mutex_);
     cfs_assert_simple(parent_inode_ == nullptr);
     bool success = false;
     g_transaction(inode_construct_info_.journal, success, GlobalTransaction_Major_SnapshotCreation);
-
 
     uint64_t new_inode_index = 0;
     {
@@ -482,7 +484,177 @@ void cfs::dentry_t::snapshot(const std::string &name)
         new_inode_index = new_inode.current_referenced_inode_;
     }
 
+    // force CoW updates from now on
+    for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
+    {
+        if (inode_construct_info_.block_manager->blk_at(i)
+            && inode_construct_info_.block_attribute->get<block_type>(i) != COW_REDUNDANCY_BLOCK)
+        {
+            inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
+        }
+    }
+
+    // remove all snapshot links in new root shadow copy
+    {
+        dentry_t new_dentry = dentry_t(new_inode_index,
+            inode_construct_info_.parent_fs_governor,
+            inode_construct_info_.block_manager,
+            inode_construct_info_.journal,
+            inode_construct_info_.block_attribute,
+            this);
+
+        for (const auto & ptr_name: dentry_map_ | std::views::keys) {
+            if (inode_construct_info_.block_attribute->get<block_status>(new_inode_index)
+                == BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01)
+            {
+                new_dentry.erase_entry(ptr_name); // CoW is enforced, so any updates should not temper the root
+            }
+        }
+
+        // update reference
+        new_inode_index = new_dentry.current_referenced_inode_;
+    }
+
+    // set new inode as snapshot entry point
     inode_construct_info_.block_attribute->set<block_status>(new_inode_index,
                                                              BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
-    freeze_all_active_blocks();
+    // under current root, add snapshot entry link
+    dentry_map_.emplace(name, new_inode_index);
+    dentry_map_reversed_search_map_.emplace(new_inode_index, name);
+    save_dentry_unblocked();
+
+    // then we mark again to mask any missing ones, and increate link count this time
+    for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
+    {
+        if (inode_construct_info_.block_manager->blk_at(i)
+            && inode_construct_info_.block_attribute->get<block_type>(i) != COW_REDUNDANCY_BLOCK)
+        {
+            inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
+            inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
+        }
+    }
+
+    inode_construct_info_.parent_fs_governor->sync(); // sync when snapshot
+}
+
+void cfs::dentry_t::revert(const std::string &name)
+{
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    cfs_assert_simple(parent_inode_ == nullptr);
+    bool success = false;
+    g_transaction(inode_construct_info_.journal, success, GlobalTransaction_Major_SnapshotCreation);
+
+    const auto ptr = dentry_map_.find(name);
+    cfs_assert_simple(ptr != dentry_map_.end());
+
+    // remove all post snapshot changes
+    for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++) {
+        if (inode_construct_info_.block_attribute->get<block_status>(i) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+            inode_construct_info_.block_manager->deallocate(i);
+        }
+    }
+
+    // backup snapshot entries
+    std::vector < std::pair < std::string, uint64_t > > snapshot_entry_list;
+    for (const auto & [pointer_name, pointer] : dentry_map_) {
+        if (inode_construct_info_.block_attribute->get<block_status>(pointer) == BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01) {
+            snapshot_entry_list.emplace_back(pointer_name, pointer);
+        }
+    }
+
+    // get inode
+    const uint64_t inode_pointer = ptr->second;
+    // make a dentry from that
+    current_referenced_inode_ = inode_pointer;
+    referenced_inode_.reset();
+    referenced_inode_ = std::make_unique<cfs_inode_service_t>(inode_pointer,
+        inode_construct_info_.parent_fs_governor,
+        inode_construct_info_.block_manager,
+        inode_construct_info_.journal,
+        inode_construct_info_.block_attribute);
+
+    // reinit dentry
+    dentry_map_.clear();
+    dentry_map_reversed_search_map_.clear();
+    read_dentry_unblocked();
+
+    // add missing snapshot entry link
+    for (const auto & [pointer_name, pointer] : snapshot_entry_list) {
+        dentry_map_.emplace(pointer_name, pointer);
+        dentry_map_reversed_search_map_.emplace(pointer, pointer_name);
+    }
+
+    save_dentry_unblocked(); // save on disk
+    inode_construct_info_.parent_fs_governor->sync(); // sync when snapshot
+}
+
+void cfs::dentry_t::delete_snapshot(const std::string &name)
+{
+    std::lock_guard<std::mutex> lock(operation_mutex_);
+    cfs_assert_simple(parent_inode_ == nullptr);
+    bool success = false;
+    g_transaction(inode_construct_info_.journal, success, GlobalTransaction_Major_SnapshotCreation);
+
+    const auto ptr = dentry_map_.find(name);
+    cfs_assert_simple(ptr != dentry_map_.end());
+    uint64_t target_index = ptr->second;
+
+    {
+        dentry_t dentry = dentry_t(target_index,
+            inode_construct_info_.parent_fs_governor,
+            inode_construct_info_.block_manager,
+            inode_construct_info_.journal,
+            inode_construct_info_.block_attribute,
+            this); // construct target child
+        std::vector<uint8_t> per_snapshot_fs_info(dentry.dentry_start_);
+        dentry.read((char*)per_snapshot_fs_info.data(), per_snapshot_fs_info.size(), sizeof(uint64_t));
+
+        auto decompressed_data = cfs::utils::arithmetic::decompress(per_snapshot_fs_info);
+
+        const auto map_size = static_info_->data_table_start - static_info_->data_table_start;
+
+        // venture and iterate through the whole system
+        // without bitmap, we have to iterate through by inode
+        // but with bitmap, we can simply use that
+        class per_snapshot_bitmap_t : public bitmap_base {
+        public:
+            explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
+            {
+                init_data_array = [&](const uint64_t)->bool
+                {
+                    data_array_ = data;
+                    return true;
+                };
+
+                init(size);
+            }
+        } per_snapshot_bitmap(decompressed_data.data(), // bitmap start
+            map_size); // particles. bytes are calculated automatically
+
+        // clean up
+        for (uint64_t i = 0; i < map_size; i++)
+        {
+            if (per_snapshot_bitmap.get_bit(i)) {
+                inode_construct_info_.block_manager->deallocate(i);
+                if (inode_construct_info_.block_attribute->get<index_node_referencing_number>(i) == 0) {
+                    inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i); // backup block type
+                    inode_construct_info_.block_attribute->set<block_type>(i, COW_REDUNDANCY_BLOCK); // set it as redundancy
+                    inode_construct_info_.parent_fs_governor->cfs_header_block.dec<allocated_non_cow_blocks>(); // remove block count
+                }
+            }
+        }
+
+        dentry.resize(0);
+        target_index = dentry.current_referenced_inode_; // update reference
+    }
+
+    inode_construct_info_.block_attribute->set<block_type>(target_index, COW_REDUNDANCY_BLOCK); // set that as redundancy
+    inode_construct_info_.parent_fs_governor->cfs_header_block.dec<allocated_non_cow_blocks>(); // and remove block count
+
+    // remove corresponding link as well
+    dentry_map_.erase(ptr);
+    dentry_map_reversed_search_map_.erase(target_index);
+    save_dentry_unblocked();
+
+    inode_construct_info_.parent_fs_governor->sync(); // sync
 }
