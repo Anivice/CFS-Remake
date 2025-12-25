@@ -218,7 +218,7 @@ namespace cfs
         /// @param path Old path
         /// @param new_path New path
         /// @return 0 means good, negative + errno means error
-        int do_rename(const std::string & path, const std::string & new_path) noexcept;
+        int do_rename(const std::string & path, const std::string & new_path, int flags) noexcept;
 
         /// Create an empty file with defined size
         /// @param path full path

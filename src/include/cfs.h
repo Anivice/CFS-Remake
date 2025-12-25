@@ -11,6 +11,7 @@ namespace cfs
         dev_t       st_dev;         /* ID of device containing file */
         ino_t       st_ino;         /* Inode number */
         mode_t      st_mode;        /* File type and mode */
+        char _reserved_[4];
         nlink_t     st_nlink;       /* Number of hard links */
         uid_t       st_uid;         /* User ID of owner */
         gid_t       st_gid;         /* Group ID of owner */
@@ -22,6 +23,8 @@ namespace cfs
         timespec    st_mtim;        /* Time of last modification */
         timespec    st_ctim;        /* Time of last status change */
     };
+    constexpr uint64_t stat_size = 120;
+    static_assert(sizeof(stat) == stat_size);
 
     constexpr uint64_t cfs_magick_number = 0xCFADBEEF20251216;
     constexpr uint64_t cfs_magic_number_compliment = ~cfs_magick_number;

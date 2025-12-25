@@ -573,7 +573,7 @@ namespace cfs
         if (vec.size() == 3) {
             const auto cfs_path_src = path_calculator(vec[1]);
             const auto cfs_path_dest = path_calculator(vec[2]);
-            const int rename_result = do_rename(cfs_path_src, cfs_path_dest);
+            const int rename_result = do_rename(cfs_path_src, cfs_path_dest, 1);
             if (rename_result != 0) {
                 elog("move: ", strerror(-rename_result), "\n");
             }
@@ -1109,7 +1109,7 @@ namespace cfs
         GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_rename(const std::string &path, const std::string &new_path) noexcept
+    int CowFileSystem::do_rename(const std::string &path, const std::string &new_path, int flags) noexcept
     {
         GENERAL_TRY() {
             auto source_vpath = path_to_vector(path);
@@ -1135,6 +1135,23 @@ namespace cfs
 
             auto source_parent_inode = make_child_inode<dentry_t>(source_parent_stat.st_ino, source_parent_parents.back().get());
             auto target_parent_inode = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get());
+
+            if (flags == 0) {
+                // RENAME_NOREPLACE is specified,
+                // the filesystem must not overwrite *newname* if it exists and return an error instead.
+                const auto target_parent_inode_list = target_parent_inode.ls();
+                if (target_parent_inode_list.find(target) != target_parent_inode_list.end()) {
+                    return -EEXIST;
+                }
+            } else if (flags == 1) {
+                // If `RENAME_EXCHANGE` is specified, the filesystem
+                // must atomically exchange the two files, i.e. both must
+                // exist and neither may be deleted.
+                const auto target_parent_inode_list = target_parent_inode.ls();
+                if (target_parent_inode_list.find(target) != target_parent_inode_list.end()) {
+                    target_parent_inode.erase_entry(target); // remove dentry
+                }
+            }
 
             const auto source_index = source_parent_inode.erase_entry(source);
             target_parent_inode.add_entry(target, source_index);
@@ -1230,20 +1247,19 @@ namespace cfs
     struct statvfs CowFileSystem::do_fstat() noexcept
     {
         const auto free = cfs_basic_filesystem_.cfs_header_block.get_info<allocated_non_cow_blocks>();
-        const struct statvfs status {
-            .f_bsize = cfs_basic_filesystem_.static_info_.block_size,
-            .f_frsize = cfs_basic_filesystem_.static_info_.block_size,
-            .f_blocks = cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start,
-            .f_bfree = free,
-            .f_bavail = free,
-            .f_files = 0,
-            .f_ffree = 0,
-            .f_favail = 0,
-            .f_fsid = 0,
-            .f_flag = 0,
-            .f_namemax = 255,
-            .f_type = 0x65735546, // FUSE
-        };
+        struct statvfs status{};
+        status.f_bsize = cfs_basic_filesystem_.static_info_.block_size;
+        status.f_frsize = cfs_basic_filesystem_.static_info_.block_size;
+        status.f_blocks = cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
+        status.f_bfree = free;
+        status.f_bavail = free;
+        status.f_files = 0;
+        status.f_ffree = 0;
+        status.f_favail = 0;
+        status.f_fsid = 0;
+        status.f_flag = 0;
+        status.f_namemax = 255;
+        status.f_type = 0x65735546; // FUSE
         return status;
     }
 
