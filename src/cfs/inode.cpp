@@ -431,23 +431,46 @@ void cfs::dentry_t::unlink(const std::string & name)
     dentry_map_reversed_search_map_.erase(inode_pointer);
     save_dentry_unblocked();
 
-    /// create child inode
-    cfs_inode_service_t target(inode_pointer,
-            inode_construct_info_.parent_fs_governor,
-            inode_construct_info_.block_manager,
-            inode_construct_info_.journal,
-            inode_construct_info_.block_attribute);
-    target.resize(0); // remove all data in inode pointers
-    inode_construct_info_.block_manager->deallocate(inode_pointer); // remove child inode
+    if (inode_construct_info_.block_attribute->get<block_status>(inode_pointer) == BLOCK_AVAILABLE_TO_MODIFY_0x00)
+    {
+        /// create child inode
+        cfs_inode_service_t target(inode_pointer,
+                inode_construct_info_.parent_fs_governor,
+                inode_construct_info_.block_manager,
+                inode_construct_info_.journal,
+                inode_construct_info_.block_attribute);
+        target.resize(0); // remove all data in inode pointers
+        inode_construct_info_.block_manager->deallocate(inode_pointer); // remove child inode
+    }
+    else {
+        // delink blocks one by one
+        auto delink_once = [&](const std::vector<uint64_t> & list) {
+            std::ranges::for_each(list, [&](const uint64_t pointer) {
+                inode_construct_info_.block_attribute->dec<index_node_referencing_number>(pointer);
+            });
+        };
+
+        cfs_inode_service_t target(inode_pointer,
+                inode_construct_info_.parent_fs_governor,
+                inode_construct_info_.block_manager,
+                inode_construct_info_.journal,
+                inode_construct_info_.block_attribute);
+        const auto [lv1, lv2, lv3] = target.linearize_all_blocks();
+        delink_once(lv1);
+        delink_once(lv2);
+        delink_once(lv3);
+        delink_once({inode_pointer});
+    }
 }
 
 uint64_t cfs::dentry_t::erase_entry(const std::string &name)
 {
     std::lock_guard lock(operation_mutex_);
+    copy_on_write();
     const auto ptr = dentry_map_.find(name);
     cfs_assert_simple (ptr != dentry_map_.end());
     const auto inode = ptr->second;
-    dentry_map_.erase(ptr);
+    dentry_map_.erase(name);
     dentry_map_reversed_search_map_.erase(inode);
     save_dentry_unblocked();
     return inode;
@@ -456,6 +479,7 @@ uint64_t cfs::dentry_t::erase_entry(const std::string &name)
 void cfs::dentry_t::add_entry(const std::string &name, const uint64_t index)
 {
     std::lock_guard lock(operation_mutex_);
+    copy_on_write();
     const auto ptr = dentry_map_.find(name);
     cfs_assert_simple (ptr == dentry_map_.end());
     dentry_map_.emplace(name, index);
@@ -484,7 +508,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
         const auto attr = inode_construct_info_.block_attribute->get(i);
-        if (inode_construct_info_.block_manager->blk_at(i) && attr.block_type == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+        if (inode_construct_info_.block_manager->blk_at(i) && attr.block_status == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
             inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
         }
     }
@@ -498,7 +522,11 @@ void cfs::dentry_t::snapshot(const std::string &name)
             inode_construct_info_.block_attribute,
             this);
 
-        for (const auto & [ptr_name, ptr]: dentry_map_) {
+        const auto dentry_map_local = dentry_map_; // erase_entry will cause a CoW that will, in turn, modify dentry_map_
+        // that means for loop will be reference an object that no longer exists, thus we use a local copy instead of direct global
+        // object
+        for (const auto & [ptr_name, ptr]: dentry_map_local)
+        {
             if (inode_construct_info_.block_attribute->get<block_status>(ptr) == BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01
                 || !inode_construct_info_.block_manager->blk_at(ptr) /* CoW refresh happened, and this inode was not notified */
                 || ptr_name == name) // me
@@ -528,7 +556,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
         const auto attr = inode_construct_info_.block_attribute->get(i);
         if (inode_construct_info_.block_manager->blk_at(i))
         {
-            if (attr.block_type == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+            if (attr.block_status == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                 inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
             }
             inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);

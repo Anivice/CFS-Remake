@@ -451,12 +451,12 @@ namespace cfs
     {
         const auto lock_ = lock(index);
         if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
-            if (lock_->allocation_oom_scan_per_refresh_count < 0xF) { // only 4 bits
+            if ((lock_->allocation_oom_scan_per_refresh_count + value) <= 0xF) { // only 4 bits
                 lock_->allocation_oom_scan_per_refresh_count += value;
             }
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
-            cfs_assert_simple(lock_->allocation_oom_scan_per_refresh_count < 0xFFFF); // 16 bits
+            cfs_assert_simple((lock_->index_node_referencing_number + value) < 0xFFFF); // 16 bits
             lock_->index_node_referencing_number += value;
         }
         else {
@@ -471,12 +471,12 @@ namespace cfs
     {
         const auto lock_ = lock(index);
         if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
-            if (lock_->allocation_oom_scan_per_refresh_count > value) {
+            if (lock_->allocation_oom_scan_per_refresh_count >= value) {
                 lock_->allocation_oom_scan_per_refresh_count -= value;
             }
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
-            if (lock_->index_node_referencing_number > value) {
+            if (lock_->index_node_referencing_number >= value) {
                 lock_->index_node_referencing_number -= value;
             }
         }
@@ -765,6 +765,7 @@ namespace cfs
         [[nodiscard]] struct stat get_stat ();
 
         friend class inode_t;
+        friend class dentry_t;
     };
 
     template<Allocator_ FuncAlloc, Deallocator_ FuncDealloc>

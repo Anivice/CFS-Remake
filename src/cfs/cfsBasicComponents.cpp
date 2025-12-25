@@ -391,7 +391,8 @@ void cfs::cfs_block_manager_t::deallocate(const uint64_t index)
     bool success = false;
     g_transaction(journal_, success, GlobalTransaction_DeallocateBlock, index);
 
-    if (block_attribute_->get<index_node_referencing_number>(index) <= 1) {
+    const auto attr = block_attribute_->get(index);
+    if (attr.block_status == BLOCK_AVAILABLE_TO_MODIFY_0x00 && attr.index_node_referencing_number <= 1) {
         block_attribute_->move<block_type, block_type_cow>(index);
         block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK);
     } else {
