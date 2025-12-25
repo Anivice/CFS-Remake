@@ -370,12 +370,12 @@ namespace cfs
             const auto & host_full_path = vec[2];
             struct stat status {};
             if (const int result = do_getattr(cfs_path, &status); result != 0) {
-                elog("getattr:", strerror(-result), "\n");
+                elog("getattr: ", strerror(-result), "\n");
             }
             else
             {
                 if (std::ofstream file (host_full_path.c_str()); !file) {
-                    elog("open:", strerror(errno), "\n");
+                    elog("open: ", strerror(errno), "\n");
                 }
                 else
                 {
@@ -405,7 +405,7 @@ namespace cfs
             const auto cfs_path_dest = path_calculator(vec[2]);
             struct stat status {};
             if (const int result = do_getattr(cfs_path_src, &status); result != 0) {
-                elog("getattr:", strerror(-result), "\n");
+                elog("getattr: ", strerror(-result), "\n");
             }
             else
             {
@@ -414,22 +414,24 @@ namespace cfs
                     std::vector<char> data;
                     data.resize(1024 * 1024 * 16);
                     off_t offset = 0;
-                    if (const int alloc_result = do_fallocate(cfs_path_dest, S_IFREG | 0755, 0, status.st_size) != 0) {
-                        elog("fallocate:", strerror(-alloc_result), "\n");
+                    if (const int alloc_result = do_fallocate(cfs_path_dest, S_IFREG | 0755, 0, status.st_size);
+                        alloc_result != 0)
+                    {
+                        elog("fallocate: ", strerror(-alloc_result), "\n");
                         return;
                     }
 
                     while (const auto rSize = do_read(cfs_path_src, data.data(), data.size(), offset))
                     {
                         if (rSize < 0) {
-                            elog("read:", strerror(-rSize), "\n");
+                            elog("read: ", strerror(-rSize), "\n");
                             return;
                         }
 
                         const int wSize = do_write(cfs_path_dest, data.data(), rSize, offset);
 
                         if (wSize < 0) {
-                            elog("write:", strerror(-wSize), "\n");
+                            elog("write: ", strerror(-wSize), "\n");
                             return;
                         }
 
@@ -458,8 +460,9 @@ namespace cfs
         {
             const cfs::basic_io::mmap file(vec[1]); // test data
             const auto path = path_calculator(vec[2]);
-            if (const int alloc_result = do_fallocate(path, S_IFREG | 0755, 0, static_cast<off_t>(file.size())) != 0) {
-                elog("fallocate:", strerror(-alloc_result), "\n");
+            if (const int alloc_result = do_fallocate(path, S_IFREG | 0755, 0, static_cast<off_t>(file.size()));
+                alloc_result != 0) {
+                elog("fallocate: ", strerror(-alloc_result), "\n");
                 return;
             }
 
@@ -472,7 +475,9 @@ namespace cfs
     void CowFileSystem::mkdir(const std::vector<std::string> &vec)
     {
         if (vec.size() == 2) {
-            do_mkdir(auto_path(vec[1]), S_IFDIR | 0755);
+            if (const int mkdir_result = do_mkdir(auto_path(vec[1]), S_IFDIR | 0755); mkdir_result != 0) {
+                elog("mkdir: ", strerror(-mkdir_result), "\n");
+            }
         } else {
             elog("mkdir [CFS Path]\n");
         }
@@ -481,7 +486,9 @@ namespace cfs
     void CowFileSystem::rmdir(const std::vector<std::string> &vec)
     {
         if (vec.size() == 2) {
-            do_rmdir(auto_path(vec[1]));
+            if (const int rmdir_result = do_rmdir(auto_path(vec[1])); rmdir_result != 0) {
+                elog("rmdir: ", strerror(-rmdir_result), "\n");
+            }
         } else {
             elog("rmdir [CFS Path]\n");
         }
@@ -490,7 +497,9 @@ namespace cfs
     void CowFileSystem::del(const std::vector<std::string> &vec)
     {
         if (vec.size() == 2) {
-            do_unlink(auto_path(vec[1]));
+            if (const int unlink_result = do_unlink(auto_path(vec[1])); unlink_result != 0) {
+                elog("unlink: ", strerror(unlink_result), "\n");
+            }
         } else {
             elog("del [CFS Path]\n");
         }
@@ -513,7 +522,7 @@ namespace cfs
         {
             const auto path = auto_path(vec[1]);
             struct stat status {};
-            if (const int result = do_getattr(path, &status) != 0) {
+            if (const int result = do_getattr(path, &status); result != 0) {
                 elog("getattr: ", strerror(-result), "\n");
                 return;
             }
@@ -914,10 +923,9 @@ namespace cfs
                     return -ENOENT;
                 }
 
-                const auto index = ptr->second;
-
                 // check if dir is empty
                 {
+                    const auto index = ptr->second;
                     auto tg_inode = make_child_inode<dentry_t>(index, &dentry);
                     if ((tg_inode.get_stat().st_mode & S_IFMT) != S_IFDIR) {
                         return -ENOTDIR;
@@ -1201,7 +1209,7 @@ namespace cfs
                 const auto cfs_path = path_calculator(vec[1]);
                 struct stat status {};
                 if (const int result = do_getattr(cfs_path, &status); result != 0) {
-                    elog("getattr:", strerror(-result), "\n");
+                    elog("getattr: ", strerror(-result), "\n");
                 }
                 else
                 {
@@ -1211,7 +1219,7 @@ namespace cfs
                     while (const auto rSize = do_read(cfs_path, data.data(), data.size(), static_cast<off_t>(offset)))
                     {
                         if (rSize < 0) {
-                            elog("read:", strerror(-rSize), "\n");
+                            elog("read: ", strerror(-rSize), "\n");
                             break;
                         }
 
