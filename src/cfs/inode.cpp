@@ -187,10 +187,11 @@ void cfs::inode_t::root_cow()
     /////////////  \/  \/\_| \_|\___/  \_/ \____/  \_|   \____/   \___/\_| \_/\_|    \___/    //////////////
     ////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    // [BITMAP]
-    // [ATTRIBUTES]
-    // [INODE]
-    // [STATIC DATA]
+    // [DENTRY ENTRY POINTER] -> 8 bytes, 64bit pointer
+    // [BITMAP]             -> Compressed
+    // [ATTRIBUTES]         -> Compressed
+    // [INODE]              -> Compressed
+    // [STATIC DATA]        -> Always the block size as bitmap, uncompressed
     // [DENTRY ENTRY]
 
     const auto bitmap_dump = referenced_inode_->block_manager_->dump_bitmap_data();
@@ -213,19 +214,18 @@ void cfs::inode_t::root_cow()
     write_to_buffer(bitmap_dump);
     write_to_buffer(attribute_dump);
     write_to_buffer(inode_metadata);
+    const std::vector<uint8_t> empty((static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size, 0);
 
     const auto data_compressed = utils::arithmetic::compress(data_);
-    dentry_start_ = data_compressed.size() + sizeof(dentry_start_); // so save_dentry_unblocked() knows where to continue
+    dentry_start_ = data_compressed.size() + sizeof(dentry_start_) + empty.size(); // so save_dentry_unblocked() knows where to continue
 
     offset = 0;
 
     referenced_inode_->resize(0);
     offset += referenced_inode_->write(reinterpret_cast<char *>(&dentry_start_), sizeof(uint64_t), offset);
     offset += referenced_inode_->write(reinterpret_cast<const char *>(data_compressed.data()), data_compressed.size(), offset);
+    offset += referenced_inode_->write(reinterpret_cast<const char *>(empty.data()), empty.size(), offset);
     /// Now, we have written all the metadata:
-    /// [LZ4 SIZE]
-    /// [LZ4 Compressed metadata]
-    /// [DENTRY]
 
     save_dentry_unblocked();
 
@@ -496,6 +496,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
     g_transaction(inode_construct_info_.journal, success, GlobalTransaction_Major_SnapshotCreation);
     std::vector<uint8_t> root_raw_dump;
     uint64_t old_dentry_start_ = 0;
+    std::vector<uint64_t> level3s;
 
     uint64_t new_inode_index = 0;
     {
@@ -505,6 +506,8 @@ void cfs::dentry_t::snapshot(const std::string &name)
         new_inode.write(reinterpret_cast<char *>(root_raw_dump.data()), root_raw_dump.size(), 0);
         new_inode_index = new_inode.current_referenced_inode_;
         old_dentry_start_ = dentry_start_;
+        const auto [lv1, lv2, lv3] = new_inode.referenced_inode_->linearize_all_blocks();
+        level3s = lv3;
     }
 
     // force CoW updates from now on
@@ -553,6 +556,36 @@ void cfs::dentry_t::snapshot(const std::string &name)
     dentry_map_reversed_search_map_.emplace(new_inode_index, name);
     save_dentry_unblocked();
 
+    auto bitmap_dump = inode_construct_info_.block_manager->dump_bitmap_data();
+    /// now, we need to replace target dump with our current bitmap dump
+    const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
+    const uint64_t map_start = old_dentry_start_ - map_bytes;
+    const uint64_t map_start_block = map_start / static_info_->block_size;
+    const uint64_t map_first_block_skip = map_start % static_info_->block_size;
+    const uint64_t map_first_block_write = map_bytes > (static_info_->block_size - map_first_block_skip)
+        ? (static_info_->block_size - map_first_block_skip)
+        : (map_bytes - map_first_block_skip);
+    const uint64_t map_rest_of_the_bytes = map_bytes - map_first_block_write;
+    const uint64_t map_rest_continuous = map_rest_of_the_bytes / static_info_->block_size;
+    const uint64_t map_last_block_write = map_rest_of_the_bytes % static_info_->block_size;
+    bitmap_dump.resize(map_bytes);
+
+    uint64_t offset = 0;
+    auto replace_write = [&](const uint64_t block, const uint64_t size, const uint64_t w_off) {
+        const auto blk_lock = inode_construct_info_.parent_fs_governor->lock(level3s[block] + static_info_->data_table_start);
+        std::memcpy(blk_lock.data() + w_off, bitmap_dump.data() + offset, size);
+        offset += size;
+    };
+
+    // without CoW, in place replace
+    replace_write(map_start_block, map_first_block_write, map_first_block_skip);
+    for (uint64_t i = 1; i <= map_rest_continuous; i++) {
+        replace_write(map_start_block + i, static_info_->block_size, 0);
+    }
+    if (map_last_block_write != 0) {
+        replace_write(map_start_block + map_rest_continuous + 1, map_last_block_write, 0);
+    }
+
     // then we mark again to mask any missing ones, and increate link count this time
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
@@ -565,34 +598,6 @@ void cfs::dentry_t::snapshot(const std::string &name)
             if (attr.block_type != COW_REDUNDANCY_BLOCK) {
                 inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
             }
-        }
-    }
-
-    std::vector<uint8_t> per_snapshot_fs_info(old_dentry_start_ - sizeof(uint64_t));
-    std::memcpy(per_snapshot_fs_info.data(), root_raw_dump.data() + sizeof(uint64_t), old_dentry_start_ - sizeof(uint64_t));
-    auto decompressed_data = cfs::utils::arithmetic::decompress(per_snapshot_fs_info);
-
-    // fix discrepancies
-    const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
-    class per_snapshot_bitmap_t : public bitmap_base {
-    public:
-        explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
-        {
-            init_data_array = [&](const uint64_t)->bool
-            {
-                data_array_ = data;
-                return true;
-            };
-
-            init(size);
-        }
-    } per_snapshot_bitmap(decompressed_data.data(), // bitmap start
-        map_size); // particles. bytes are calculated automatically
-
-    for (uint64_t i = 0; i < map_size; i++)
-    {
-        if (inode_construct_info_.block_manager->blk_at(i) && !per_snapshot_bitmap.get_bit(i)) {
-            wlog("discrepancies: ", i, "\n");
         }
     }
 
@@ -666,8 +671,11 @@ void cfs::dentry_t::revert(const std::string &name)
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
         const auto attr = inode_construct_info_.block_attribute->get(i);
-        if (inode_construct_info_.block_manager->blk_at(i) && attr.block_status != BLOCK_AVAILABLE_TO_MODIFY_0x00) {
-            inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
+        if (inode_construct_info_.block_manager->blk_at(i) )
+        {
+            if (attr.block_status != BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
+            }
             non_cow_blocks += (attr.block_type != 0x00) ? 1 : 0;
         }
     }
@@ -695,11 +703,11 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
             inode_construct_info_.journal,
             inode_construct_info_.block_attribute,
             this); // construct target child
-        std::vector<uint8_t> per_snapshot_fs_info(dentry.dentry_start_ - sizeof(uint64_t));
-        dentry.read((char*)per_snapshot_fs_info.data(), per_snapshot_fs_info.size(), sizeof(uint64_t));
-
-        auto decompressed_data = cfs::utils::arithmetic::decompress(per_snapshot_fs_info);
+        const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
+        const uint64_t map_start = dentry.dentry_start_ - map_bytes;
         const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
+        std::vector<uint8_t> per_snapshot_fs_info(map_bytes);
+        dentry.read((char*)per_snapshot_fs_info.data(), map_bytes, map_start);
 
         // venture and iterate through the whole system
         // without bitmap, we have to iterate through by inode
@@ -716,7 +724,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
 
                 init(size);
             }
-        } per_snapshot_bitmap(decompressed_data.data(), // bitmap start
+        } per_snapshot_bitmap(per_snapshot_fs_info.data(), // bitmap start
             map_size); // particles. bytes are calculated automatically
 
         dentry.resize(0);
@@ -752,7 +760,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
         const auto attr = inode_construct_info_.block_attribute->get(i);
-        if (inode_construct_info_.block_manager->blk_at(i) && attr.block_status != BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+        if (inode_construct_info_.block_manager->blk_at(i)) {
             non_cow_blocks += (attr.block_type != 0x00) ? 1 : 0;
         }
     }
