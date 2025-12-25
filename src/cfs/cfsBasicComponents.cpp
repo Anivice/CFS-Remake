@@ -923,7 +923,7 @@ void cfs::cfs_inode_service_t::set_mtime(const timespec st_mtim)
     this->cfs_inode_attribute->st_atim = st_mtim;
 }
 
-struct stat cfs::cfs_inode_service_t::get_stat()
+cfs::stat cfs::cfs_inode_service_t::get_stat()
 {
     std::lock_guard<std::mutex> lock(mutex_);
     return *cfs_inode_attribute;

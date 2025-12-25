@@ -238,8 +238,8 @@ namespace cfs
                 inode_stat = {
                     .st_dev = 0,
                     .st_ino = new_index,
-                    .st_nlink = 1,
                     .st_mode = S_IFDIR | 0755,
+                    .st_nlink = 1,
                     .st_uid = getuid(),
                     .st_gid = getgid(),
                     .st_rdev = 0,
@@ -255,8 +255,8 @@ namespace cfs
                 inode_stat = {
                     .st_dev = 0,
                     .st_ino = new_index,
-                    .st_nlink = 1,
                     .st_mode = S_IFREG | 0755,
+                    .st_nlink = 1,
                     .st_uid = getuid(),
                     .st_gid = getgid(),
                     .st_rdev = 0,
@@ -272,8 +272,8 @@ namespace cfs
                 inode_stat = {
                     .st_dev = 0,
                     .st_ino = new_index,
-                    .st_nlink = 1,
                     .st_mode = S_IFREG | 0755,
+                    .st_nlink = 1,
                     .st_uid = getuid(),
                     .st_gid = getgid(),
                     .st_rdev = 0,

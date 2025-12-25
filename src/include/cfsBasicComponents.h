@@ -762,7 +762,7 @@ namespace cfs
         void set_mtime(timespec st_mtim);   // change st_mtim
 
         /// get struct stat
-        [[nodiscard]] struct stat get_stat ();
+        [[nodiscard]] stat get_stat ();
 
         friend class inode_t;
         friend class dentry_t;

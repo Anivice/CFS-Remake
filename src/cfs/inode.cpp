@@ -385,7 +385,7 @@ uint64_t cfs::inode_t::size()
     return size_unblocked();
 }
 
-struct stat cfs::inode_t::get_stat()
+cfs::stat cfs::inode_t::get_stat()
 {
     std::lock_guard lock(operation_mutex_);
     return get_stat_unblocked();

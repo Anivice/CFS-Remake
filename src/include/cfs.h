@@ -7,7 +7,24 @@
 
 namespace cfs
 {
+    struct stat {
+        dev_t       st_dev;         /* ID of device containing file */
+        ino_t       st_ino;         /* Inode number */
+        mode_t      st_mode;        /* File type and mode */
+        nlink_t     st_nlink;       /* Number of hard links */
+        uid_t       st_uid;         /* User ID of owner */
+        gid_t       st_gid;         /* Group ID of owner */
+        dev_t       st_rdev;        /* Device ID (if special file) */
+        off_t       st_size;        /* Total size, in bytes */
+        blksize_t   st_blksize;     /* Block size for filesystem I/O */
+        blkcnt_t    st_blocks;      /* Number of 512 B blocks allocated */
+        timespec    st_atim;        /* Time of last access */
+        timespec    st_mtim;        /* Time of last modification */
+        timespec    st_ctim;        /* Time of last status change */
+    };
+
     constexpr uint64_t cfs_magick_number = 0xCFADBEEF20251216;
+    constexpr uint64_t cfs_magic_number_compliment = ~cfs_magick_number;
     constexpr uint64_t cfs_header_size = 512;
 
     constexpr auto cfs_implementation_version = CFS_IMPLEMENT_VERSION;

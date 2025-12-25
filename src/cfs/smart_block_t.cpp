@@ -293,8 +293,8 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     struct stat root_stat = {
         .st_dev = 0,
         .st_ino = 0,
-        .st_nlink = 1,
         .st_mode = S_IFDIR | 0755,
+        .st_nlink = 1,
         .st_uid = getuid(),
         .st_gid = getgid(),
         .st_rdev = 0,

@@ -128,7 +128,7 @@ void cfs::utils::print_table(const std::vector<std::pair<std::string, int>> &tit
     }
 
     std::vector<std::string> on_screen_content;
-    auto print = [&on_screen_content, &spaces, &col](const auto & values, const auto & justification)
+    auto print = [&on_screen_content, &spaces](const auto & values, const auto & justification)
     {
         uint64_t index = 0;
         for (const auto & value : values)
