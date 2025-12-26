@@ -73,7 +73,8 @@ int main(int argc, char** argv)
             return EXIT_SUCCESS;
         }
 
-        if (parsed.contains("path")) {
+        if (parsed.contains("path"))
+        {
             cfs::CowFileSystem CowFileSystem(parsed["path"]);
             if (!parsed.contains('c')) {
                 CowFileSystem.readline();

@@ -1019,24 +1019,21 @@ namespace cfs
     int CowFileSystem::do_symlink(const std::string & path, const std::string & target_) noexcept
     {
         GENERAL_TRY() {
-            auto source_vpath = path_to_vector(path);
             auto target_vpath = path_to_vector(target_);
-            if (source_vpath.empty() || target_vpath.empty()) {
+            if (target_vpath.empty()) {
                 return -EINVAL;
             }
 
             const auto target = target_vpath.back();
             target_vpath.pop_back();
 
-            const auto [source, parents]
-                = deference_inode_from_path(source_vpath);
             auto [target_parent, target_parent_parents]
-                = deference_inode_from_path(source_vpath);
+                = deference_inode_from_path(target_vpath);
 
             const auto target_parent_stat = target_parent->get_stat();;
             target_parent.reset();
 
-            auto dentry = make_child_inode<dentry_t>(target_parent_stat.st_ino, parents.back().get());
+            auto dentry = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get()); // parent
             auto inode = dentry.make_inode<inode_t>(target);
             inode.chmod(S_IFLNK | 0755);
             inode.write(path.c_str(), path.size(), 0);
@@ -1112,49 +1109,53 @@ namespace cfs
     int CowFileSystem::do_rename(const std::string &path, const std::string &new_path, int flags) noexcept
     {
         GENERAL_TRY() {
-            auto source_vpath = path_to_vector(path);
             auto target_vpath = path_to_vector(new_path);
-            if (source_vpath.empty() || target_vpath.empty()) {
+            auto source_vpath = path_to_vector(path);
+
+            if (target_vpath.empty() || source_vpath.empty()) {
                 return -EINVAL;
             }
 
-            const auto source = source_vpath.back();
-            source_vpath.pop_back();
-            const auto target = target_vpath.back();
-            target_vpath.pop_back();
-
-            auto [source_parent, source_parent_parents]
-                = deference_inode_from_path(source_vpath);
-            auto [target_parent, target_parent_parents]
-                = deference_inode_from_path(source_vpath);
-
-            const auto source_parent_stat = source_parent->get_stat();
-            const auto target_parent_stat = target_parent->get_stat();
-            source_parent.reset();
-            target_parent.reset();
-
-            auto source_parent_inode = make_child_inode<dentry_t>(source_parent_stat.st_ino, source_parent_parents.back().get());
-            auto target_parent_inode = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get());
-
-            if (flags == 0) {
-                // RENAME_NOREPLACE is specified,
-                // the filesystem must not overwrite *newname* if it exists and return an error instead.
-                const auto target_parent_inode_list = target_parent_inode.ls();
-                if (target_parent_inode_list.find(target) != target_parent_inode_list.end()) {
-                    return -EEXIST;
-                }
-            } else if (flags == 1) {
-                // If `RENAME_EXCHANGE` is specified, the filesystem
-                // must atomically exchange the two files, i.e. both must
-                // exist and neither may be deleted.
-                const auto target_parent_inode_list = target_parent_inode.ls();
-                if (target_parent_inode_list.find(target) != target_parent_inode_list.end()) {
-                    target_parent_inode.erase_entry(target); // remove dentry
-                }
+            uint64_t source_index = 0;
+            {
+                const auto source = source_vpath.back();
+                source_vpath.pop_back();
+                auto [source_parent, source_parent_parents]
+                    = deference_inode_from_path(source_vpath);
+                const auto source_parent_stat = source_parent->get_stat();
+                source_parent.reset();
+                auto source_parent_inode = make_child_inode<dentry_t>(source_parent_stat.st_ino, source_parent_parents.back().get());
+                source_index = source_parent_inode.erase_entry(source);
             }
 
-            const auto source_index = source_parent_inode.erase_entry(source);
-            target_parent_inode.add_entry(target, source_index);
+            {
+                const auto target = target_vpath.back();
+                target_vpath.pop_back();
+                auto [target_parent, target_parent_parents]
+                    = deference_inode_from_path(target_vpath);
+                const auto target_parent_stat = target_parent->get_stat();
+                target_parent.reset();
+                auto target_parent_inode = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get());
+
+                if (flags == 0) {
+                    // RENAME_NOREPLACE is specified,
+                    // the filesystem must not overwrite *newname* if it exists and return an error instead.
+                    const auto target_parent_inode_list = target_parent_inode.ls();
+                    if (target_parent_inode_list.find(target) != target_parent_inode_list.end()) {
+                        return -EEXIST;
+                    }
+                } else if (flags == 1) {
+                    // If `RENAME_EXCHANGE` is specified, the filesystem
+                    // must atomically exchange the two files, i.e. both must
+                    // exist and neither may be deleted.
+                    const auto target_parent_inode_list = target_parent_inode.ls();
+                    if (target_parent_inode_list.find(target) != target_parent_inode_list.end()) {
+                        target_parent_inode.erase_entry(target); // remove dentry
+                    }
+                }
+
+                target_parent_inode.add_entry(target, source_index);
+            }
 
             return 0;
         }
@@ -1246,13 +1247,13 @@ namespace cfs
 
     struct statvfs CowFileSystem::do_fstat() noexcept
     {
-        const auto free = cfs_basic_filesystem_.cfs_header_block.get_info<allocated_non_cow_blocks>();
+        const auto used = cfs_basic_filesystem_.cfs_header_block.get_info<allocated_non_cow_blocks>();
         struct statvfs status{};
         status.f_bsize = cfs_basic_filesystem_.static_info_.block_size;
         status.f_frsize = cfs_basic_filesystem_.static_info_.block_size;
         status.f_blocks = cfs_basic_filesystem_.static_info_.data_table_end - cfs_basic_filesystem_.static_info_.data_table_start;
-        status.f_bfree = free;
-        status.f_bavail = free;
+        status.f_bfree = status.f_blocks - used;
+        status.f_bavail = status.f_blocks - used;
         status.f_files = 0;
         status.f_ffree = 0;
         status.f_favail = 0;

@@ -253,9 +253,17 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
     int fd = 0;
     const uint64_t size_bytes = fs::file_size(path_to_block_file);
     assert_throw((fd = open(path_to_block_file.c_str(), O_RDWR)) > 0, "invalid file descriptor");
-    assert_throw(fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, size_bytes) == 0, "fallocate() failed");
-    assert_throw(fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, size_bytes) == 0, "fallocate() failed");
-    close(fd);
+    if ((fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, static_cast<off_t>(size_bytes)) != 0)
+        || (fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, static_cast<off_t>(size_bytes)) != 0))
+    {
+        close(fd);
+        basic_io::mmap file(path_to_block_file);
+        std::memset(file.data(), 0, file.size());
+    }
+    else {
+        close(fd);
+    }
+
     ilog("Discarding finished\n");
     std::vector<uint8_t> empty_blk;
     cfs_head_t head{};

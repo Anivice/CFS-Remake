@@ -343,6 +343,8 @@ int mount_main(int argc, char **argv)
 
         const int d_fuse_argc = static_cast<int>(fuse_args.size()) + 1;
         char ** d_fuse_argv = fuse_argv.get();
+
+        cfs_entity_ptr = std::make_unique<cfs::CowFileSystem>(parsed.at("path"));
         return fuse_redirect(d_fuse_argc, d_fuse_argv);
     }
     catch (const std::exception & e)
