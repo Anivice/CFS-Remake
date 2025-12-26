@@ -14,6 +14,19 @@ std::string cfs::utils::getenv(const std::string& name) noexcept
     return var;
 }
 
+std::vector<std::string> cfs::utils::splitString(const std::string& s, const char delim)
+{
+    std::vector<std::string> parts;
+    std::string token;
+    std::stringstream ss(s);
+
+    while (std::getline(ss, token, delim)) {
+        parts.push_back(token);
+    }
+
+    return parts;
+}
+
 std::string cfs::utils::replace_all(
     std::string & original,
     const std::string & target,

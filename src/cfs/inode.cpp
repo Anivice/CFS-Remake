@@ -124,7 +124,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
     if (parent_inode_ != nullptr)
     {
         const auto new_inode_num_ = parent_inode_->copy_on_write_invoked_from_child(current_referenced_inode_, my_data); // upload
-        dlog("copy-on-write, block=", current_referenced_inode_, ", redirect=", new_inode_num_, ", parent=", parent_inode_->get_stat().st_ino, "\n");
+        dlog("copy-on-write, block=", current_referenced_inode_, ", redirect=", new_inode_num_, ", parent=", parent_inode_->current_referenced_inode_, "\n");
         if (new_inode_num_ != current_referenced_inode_) // I got referenced
         {
             const auto old_ = current_referenced_inode_;
@@ -147,9 +147,9 @@ void cfs::inode_t::copy_on_write() // CoW entry
     }
     else
     {
-        dlog("ROOT: copy-on-write, block=", current_referenced_inode_);
+        dlog("/: copy-on-write, block=", current_referenced_inode_);
         root_cow();
-        dlog("redirect=", current_referenced_inode_, "\n");
+        dlog(", redirect=", current_referenced_inode_, "\n");
     }
 }
 
@@ -253,6 +253,8 @@ uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index
     // check if we are a snapshot entry
     cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
         != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
+    const auto old_ = current_referenced_inode_;
+    copy_on_write();
 
     // now, we start to change current dentry reference
     const auto ptr = dentry_map_reversed_search_map_.find(cow_index);
@@ -287,6 +289,8 @@ uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index
     referenced_inode_->resize(dentry_start_); // clear old data
     save_dentry_unblocked(); // write
 
+    dlog("copy-on-write child-relink, child block=", cow_index, ", child redirect=", new_block,
+        ", parent (me)=", current_referenced_inode_, " (from=", old_, ", name=", name, ")\n");
     // return the new block to child
     return new_block;
 }

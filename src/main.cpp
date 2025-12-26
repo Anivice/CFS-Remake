@@ -17,6 +17,8 @@ utils::PreDefinedArgumentType::PreDefinedArgument MainArgument = {
     { .short_name = 'v', .long_name = "version",    .argument_required = false, .description = "Show version" },
     { .short_name = 'p', .long_name = "path",       .argument_required = true,  .description = "Path to CFS archive file" },
     { .short_name = 'c', .long_name = "",           .argument_required = true,  .description = "Execute a CFS command" },
+    { .short_name = 'r', .long_name = "route",      .argument_required = true,  .description = "Specify a route" },
+    { .short_name = 'F', .long_name = "flags",      .argument_required = true,  .description = "Specify route arguments" },
 };
 
 int main(int argc, char** argv)
@@ -71,6 +73,36 @@ int main(int argc, char** argv)
             std::cout.write(reinterpret_cast<const char *>(version_text), version_text_len);
             std::cout << std::endl;
             return EXIT_SUCCESS;
+        }
+
+        if (parsed.contains("route"))
+        {
+            std::unique_ptr<char*[]> r_argv;
+            std::vector<std::string> r_args;
+            if (parsed.contains("flags")) {
+                r_args = utils::splitString(parsed.at("flags"), ' ');
+            }
+
+            r_argv = std::make_unique<char*[]>(r_args.size() + 1);
+            r_argv[0] = argv[0]; // redirect
+            for (int i = 0; i < static_cast<int>(r_args.size()); ++i) {
+                r_argv[i + 1] = const_cast<char *>(r_args[i].c_str());
+            }
+
+            const int d_argc = static_cast<int>(r_args.size()) + 1;
+            char ** d_argv = r_argv.get();
+
+            if (parsed.at("route") == "fsck.cfs") {
+                return fsck_main(d_argc, d_argv);
+            }
+
+            if (parsed.at("route") == "mount.cfs") {
+                return mount_main(d_argc, d_argv);
+            }
+
+            if (parsed.at("route") == "mkfs.cfs") {
+                return mkfs_main(d_argc, d_argv);
+            }
         }
 
         if (parsed.contains("path"))

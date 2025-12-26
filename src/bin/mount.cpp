@@ -253,18 +253,7 @@ int fuse_redirect(const int argc, char ** argv)
     return ret;
 }
 
-static std::vector<std::string> splitString(const std::string& s, const char delim = ' ')
-{
-    std::vector<std::string> parts;
-    std::string token;
-    std::stringstream ss(s);
 
-    while (std::getline(ss, token, delim)) {
-        parts.push_back(token);
-    }
-
-    return parts;
-}
 
 int mount_main(int argc, char **argv)
 {
@@ -322,7 +311,7 @@ int mount_main(int argc, char **argv)
         }
 
         std::unique_ptr<char*[]> fuse_argv;
-        std::vector<std::string> fuse_args = splitString(arg_val, ' ');
+        std::vector<std::string> fuse_args = utils::splitString(arg_val, ' ');
         if constexpr (DEBUG) {
             // fuse_args.emplace_back("-s");
             // fuse_args.emplace_back("-d");

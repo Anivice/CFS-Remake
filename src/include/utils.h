@@ -18,6 +18,8 @@ namespace cfs::utils
     /// @return Return the environment variable, or empty string if unset
     std::string getenv(const std::string& name) noexcept;
 
+    std::vector<std::string> splitString(const std::string& s, char delim = ' ');
+
     /// Replace string inside a string
     /// @param original Original string
     /// @param target String to be replaced
