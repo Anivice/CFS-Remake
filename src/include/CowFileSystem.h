@@ -87,6 +87,30 @@ namespace cfs
 
         [[nodiscard]] std::string auto_path(const std::string & path) const;
 
+        template < typename Type >
+        bool is_snapshot_entry(const Type & list)
+        {
+            return std::ranges::any_of(list, [&](const auto & p)
+            {
+                if (p == nullptr) return false;
+                if (block_attribute_.get<block_status>(p->get_stat().st_ino)
+                    == BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01)
+                {
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        template < typename Type1, typename Type2 >
+        bool check_entry(const Type1 & list, const Type2 & child)
+        {
+            std::vector< inode_t *> children;
+            children.push_back(child.get());
+            return is_snapshot_entry(list) || is_snapshot_entry(children); // any_of
+        };
+
+
     public:
         /// get attributes from an inode by path
         /// @param path Full path

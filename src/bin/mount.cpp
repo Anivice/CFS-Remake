@@ -172,7 +172,8 @@ static int fuse_do_ioctl(const char *, const unsigned int cmd, void *,
         return -ENOTTY;
     }
 
-    if (cmd == CFS_PUSH_SNAPSHOT) {
+    if (cmd == CFS_PUSH_SNAPSHOT)
+    {
         const auto *msg = static_cast<snapshot_ioctl_msg *>(data);
         if (msg->action == SNAPSHOT_CREATE) {
             return cfs_entity_ptr->do_snapshot(msg->snapshot_name);

@@ -116,6 +116,10 @@ std::vector<uint8_t> cfs::inode_t::dump_inode_raw() const
 
 void cfs::inode_t::copy_on_write() // CoW entry
 {
+    // check if we are a snapshot entry
+    cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
+        != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
+
     const std::vector<uint8_t> my_data = dump_inode_raw();
     if (parent_inode_ != nullptr)
     {
@@ -244,6 +248,10 @@ void cfs::inode_t::root_cow()
 
 uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index, const std::vector<uint8_t> &content)
 {
+    // check if we are a snapshot entry
+    cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
+        != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
+
     /// check if child needs a reference
     if (!inode_construct_info_.block_attribute->get<newly_allocated_thus_no_cow>(cow_index)
         || inode_construct_info_.block_attribute->get<block_status>(cow_index) != BLOCK_AVAILABLE_TO_MODIFY_0x00)
@@ -547,10 +555,6 @@ void cfs::dentry_t::snapshot(const std::string &name)
         new_inode_index = new_dentry.current_referenced_inode_;
     }
 
-    // set new inode as snapshot entry point
-    inode_construct_info_.block_attribute->set<block_status>(new_inode_index,
-                                                             BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
-
     // under current root, add snapshot entry link
     dentry_map_.emplace(name, new_inode_index);
     dentry_map_reversed_search_map_.emplace(new_inode_index, name);
@@ -601,13 +605,17 @@ void cfs::dentry_t::snapshot(const std::string &name)
         }
     }
 
+    // set new inode as snapshot entry point
+    inode_construct_info_.block_attribute->set<block_status>(new_inode_index,
+                                                             BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
+
     inode_construct_info_.parent_fs_governor->sync(); // sync when snapshot
 }
 
 void cfs::dentry_t::revert(const std::string &name)
 {
     std::lock_guard<std::mutex> lock(operation_mutex_);
-    cfs_assert_simple(parent_inode_ == nullptr);
+    cfs_assert_simple(parent_inode_ == nullptr); // force root
     bool success = false;
     g_transaction(inode_construct_info_.journal, success, GlobalTransaction_Major_SnapshotCreation);
 
@@ -652,7 +660,7 @@ void cfs::dentry_t::revert(const std::string &name)
     dentry_map_.clear();
     dentry_map_reversed_search_map_.clear();
     read_dentry_unblocked();
-    copy_on_write(); // force a CoW to redirect root
+    root_cow(); // force a CoW to redirect root, skip check (we will discard)
 
     // add missing snapshot entry link
     for (const auto & [pointer_name, pointer] : snapshot_entry_list)
@@ -696,6 +704,8 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     cfs_assert_simple(ptr != dentry_map_.end());
     uint64_t target_index = ptr->second;
 
+    cfs_inode_service_t::linearized_block_t occupied_blocks;
+
     {
         dentry_t dentry = dentry_t(target_index,
             inode_construct_info_.parent_fs_governor,
@@ -727,7 +737,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         } per_snapshot_bitmap(per_snapshot_fs_info.data(), // bitmap start
             map_size); // particles. bytes are calculated automatically
 
-        dentry.resize(0);
+        occupied_blocks = dentry.referenced_inode_->linearize_all_blocks();
 
         // clean up
         for (uint64_t i = 0; i < map_size; i++)
@@ -746,8 +756,19 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         target_index = dentry.current_referenced_inode_; // update reference
     }
 
-    inode_construct_info_.block_attribute->move<block_type, block_type_cow>(target_index); // backup block type
-    inode_construct_info_.block_attribute->set<block_type>(target_index, COW_REDUNDANCY_BLOCK); // set that as redundancy
+    auto delete_block = [this](const std::vector<uint64_t> & blk)
+    {
+        std::ranges::for_each(blk, [this](const uint64_t p) {
+            inode_construct_info_.block_attribute->move<block_type, block_type_cow>(p); // backup block type
+            inode_construct_info_.block_attribute->set<block_type>(p, COW_REDUNDANCY_BLOCK); // set that as redundancy
+        });
+    };
+
+    // remove all occupied blocks
+    delete_block(occupied_blocks.level1_pointers);
+    delete_block(occupied_blocks.level2_pointers);
+    delete_block(occupied_blocks.level3_pointers);
+    delete_block({ target_index });
 
     // remove corresponding link as well
     dentry_map_.erase(name);

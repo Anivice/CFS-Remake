@@ -775,10 +775,18 @@ namespace cfs
 
             auto [child, parents]
                 = deference_inode_from_path(vpath);
+
+            if (check_entry(parents, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
+
             const auto child_stat = child->get_stat();
             child.reset();
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR) {
                 auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                dentry.set_mtime(utils::get_timespec());
+                dentry.set_atime(utils::get_timespec());
+                dentry.set_ctime(utils::get_timespec());
 
                 // see if target exists
                 if (const auto list = dentry.ls(); list.find(target) != list.end()) {
@@ -787,6 +795,9 @@ namespace cfs
 
                 auto new_dentry = dentry.make_inode<dentry_t>(target);
                 new_dentry.chmod(mode | S_IFDIR);
+                new_dentry.set_mtime(utils::get_timespec());
+                new_dentry.set_atime(utils::get_timespec());
+                new_dentry.set_ctime(utils::get_timespec());
                 return 0;
             }
 
@@ -801,6 +812,11 @@ namespace cfs
             const auto vpath = path_to_vector(path);
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
+
+            if (check_entry(parent, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
+
             child->chown(uid, gid);
             child->set_ctime(utils::get_timespec());
             return 0;
@@ -814,6 +830,11 @@ namespace cfs
             const auto vpath = path_to_vector(path);
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
+
+            if (check_entry(parent, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
+
             child->chmod(mode);
             child->set_ctime(utils::get_timespec());
             return 0;
@@ -834,6 +855,11 @@ namespace cfs
 
             auto [child, parents]
                 = deference_inode_from_path(vpath);
+
+            if (check_entry(parents, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
+
             const auto child_stat = child->get_stat();
             child.reset();
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR) {
@@ -842,7 +868,14 @@ namespace cfs
                     return -EEXIST;
                 }
                 auto inode = dentry.make_inode<inode_t>(target);
+                dentry.set_mtime(utils::get_timespec());
+                dentry.set_atime(utils::get_timespec());
+                dentry.set_ctime(utils::get_timespec());
+
                 inode.chmod(mode | S_IFREG);
+                inode.set_mtime(utils::get_timespec());
+                inode.set_atime(utils::get_timespec());
+                inode.set_ctime(utils::get_timespec());
                 return 0;
             }
 
@@ -875,7 +908,7 @@ namespace cfs
             mode <<= 6;
             mode &= 0x01C0;
             auto st_mode = child->get_stat().st_mode;
-            if (block_attribute_.get<block_status>(child->get_stat().st_ino) != BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+            if (check_entry(parent, child)) { // not normal block
                 st_mode &= 0500; // strip write permission
             }
             return -!(mode & st_mode);
@@ -911,7 +944,12 @@ namespace cfs
             const auto vpath = path_to_vector(path);
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
+            if (check_entry(parent, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
             child->set_mtime(utils::get_timespec());
+            child->set_atime(utils::get_timespec());
+            child->set_ctime(utils::get_timespec());
             return static_cast<int>(child->write(buffer, size, offset));
         }
         GENERAL_CATCH()
@@ -944,12 +982,18 @@ namespace cfs
 
             auto [child, parents]
                 = deference_inode_from_path(vpath);
+            if (check_entry(parents, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
             const auto child_stat = child->get_stat();
             child.reset();
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
             {
                 auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
                 dentry.unlink(target);
+                dentry.set_mtime(utils::get_timespec());
+                dentry.set_atime(utils::get_timespec());
+                dentry.set_ctime(utils::get_timespec());
                 return 0;
             }
 
@@ -997,6 +1041,9 @@ namespace cfs
 
                 // remove when empty
                 dentry.unlink(target);
+                dentry.set_mtime(utils::get_timespec());
+                dentry.set_atime(utils::get_timespec());
+                dentry.set_ctime(utils::get_timespec());
                 return 0;
             }
 
@@ -1012,21 +1059,23 @@ namespace cfs
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
             child->set_mtime(utils::get_timespec());
+            child->set_atime(utils::get_timespec());
+            child->set_ctime(utils::get_timespec());
             child->resize(size);
             return 0;
         }
         GENERAL_CATCH()
     }
 
-    int CowFileSystem::do_symlink(const std::string & path, const std::string & target_) noexcept
+    int CowFileSystem::do_symlink(const std::string & path, const std::string & target) noexcept
     {
         GENERAL_TRY() {
-            auto target_vpath = path_to_vector(target_);
+            auto target_vpath = path_to_vector(target);
             if (target_vpath.empty()) {
                 return -EINVAL;
             }
 
-            const auto target = target_vpath.back();
+            const auto target_ = target_vpath.back();
             target_vpath.pop_back();
 
             auto [target_parent, target_parent_parents]
@@ -1036,9 +1085,17 @@ namespace cfs
             target_parent.reset();
 
             auto dentry = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get()); // parent
-            auto inode = dentry.make_inode<inode_t>(target);
+            dentry.set_mtime(utils::get_timespec());
+            dentry.set_atime(utils::get_timespec());
+            dentry.set_ctime(utils::get_timespec());
+
+            auto inode = dentry.make_inode<inode_t>(target_);
             inode.chmod(S_IFLNK | 0755);
             inode.write(path.c_str(), path.size(), 0);
+            inode.set_mtime(utils::get_timespec());
+            inode.set_atime(utils::get_timespec());
+            inode.set_ctime(utils::get_timespec());
+
             return -ENOTDIR;
         }
         GENERAL_CATCH()
@@ -1128,6 +1185,9 @@ namespace cfs
                 source_parent.reset();
                 auto source_parent_inode = make_child_inode<dentry_t>(source_parent_stat.st_ino, source_parent_parents.back().get());
                 source_index = source_parent_inode.erase_entry(source);
+                source_parent_inode.set_mtime(utils::get_timespec());
+                source_parent_inode.set_atime(utils::get_timespec());
+                source_parent_inode.set_ctime(utils::get_timespec());
             }
 
             {
@@ -1157,6 +1217,9 @@ namespace cfs
                 }
 
                 target_parent_inode.add_entry(target, source_index);
+                target_parent_inode.set_mtime(utils::get_timespec());
+                target_parent_inode.set_atime(utils::get_timespec());
+                target_parent_inode.set_ctime(utils::get_timespec());
             }
 
             return 0;
@@ -1188,10 +1251,18 @@ namespace cfs
                     auto inode = dentry.make_inode<inode_t>(target);
                     inode.chmod(mode | S_IFREG);
                     inode.resize(offset + length);
+
+                    inode.set_mtime(utils::get_timespec());
+                    inode.set_atime(utils::get_timespec());
+                    inode.set_ctime(utils::get_timespec());
                 } else {
                     auto inode = make_child_inode<inode_t>(ptr->second, &dentry); // target exists so we write
                     inode.chmod(mode | S_IFREG);
                     inode.resize(offset + length);
+
+                    inode.set_mtime(utils::get_timespec());
+                    inode.set_atime(utils::get_timespec());
+                    inode.set_ctime(utils::get_timespec());
                 }
                 return 0;
             }
@@ -1236,9 +1307,16 @@ namespace cfs
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
             {
                 auto dentry = make_child_inode<dentry_t>(child_stat.st_ino, parents.back().get());
+                dentry.set_mtime(utils::get_timespec());
+                dentry.set_atime(utils::get_timespec());
+                dentry.set_ctime(utils::get_timespec());
+
                 auto inode = dentry.make_inode<inode_t>(target);
                 inode.chmod(mode);
                 inode.chdev(device);
+                inode.set_mtime(utils::get_timespec());
+                inode.set_atime(utils::get_timespec());
+                inode.set_ctime(utils::get_timespec());
                 return 0;
             }
 

@@ -29,8 +29,19 @@ namespace cfs
         uint64_t dentry_start_ = 0; /// dentry info offset, for root metadata jump
 
         std::mutex operation_mutex_;
-        /* tsl::hopscotch_map */ std::unordered_map <std::string, uint64_t> dentry_map_; /// name -> inode dentry
-        /* tsl::hopscotch_map */ std::unordered_map <uint64_t, std::string> dentry_map_reversed_search_map_; /// reversed search map, inode -> name
+#if DEBUG
+        std::unordered_map <std::string, uint64_t>
+#else
+        tsl::hopscotch_map <std::string, uint64_t>
+#endif
+        dentry_map_; /// name -> inode dentry
+
+#if DEBUG
+        std::unordered_map <uint64_t, std::string>
+#else
+        tsl::hopscotch_map <uint64_t, std::string>
+#endif
+        dentry_map_reversed_search_map_; /// reversed search map, inode -> name
 
         [[nodiscard]] mode_t inode_type() const { return referenced_inode_->get_stat().st_mode & S_IFMT; } // POSIX types
 
@@ -125,6 +136,8 @@ namespace cfs
         uint64_t size();
 
         virtual ~inode_t() = default;
+
+        friend class dentry_t;
     };
 
     class file_t : public inode_t {

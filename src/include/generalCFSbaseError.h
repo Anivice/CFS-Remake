@@ -67,7 +67,11 @@ namespace cfs::error                                                            
 }
 
 make_simple_error_class_traceable(assertion_failed);
-#define assert_throw(condition, msg) if (!(condition)) { throw cfs::error::assertion_failed("Assertion `" #condition "` failed: " msg); }
+#define assert_throw(condition, msg)                                                                    \
+    if (!(condition)) {                                                                                 \
+        elog("Assertion failed: " #condition "` failed\n");                                             \
+        throw cfs::error::assertion_failed("Assertion `" #condition "` failed: " msg);                  \
+    }
 #define cfs_assert_simple(condition) assert_throw(condition, "")
 
 #endif //CFS_REMAKE_GENERAL_CFS_ERROR_H

@@ -25,7 +25,7 @@ int main(int argc, char **argv)
 
     auto const mountpoint = argv[1];
     auto const action = argv[2];
-    auto const destination = argv[3];
+    auto const snapshot_name = argv[3];
     const int fd = open(mountpoint, O_DIRECTORY | O_RDONLY);
     if (fd < 0) {
         perror("open");
@@ -45,15 +45,14 @@ int main(int argc, char **argv)
     }
 
     struct snapshot_ioctl_msg irq = {};
-    irq.snapshot_name[0] = '/';
-    for (size_t i = 0; i < strlen(destination); i++)
+    for (size_t i = 0; i < strlen(snapshot_name); i++)
     {
-        if (destination[i] == '/') {
+        if (snapshot_name[i] == '/') {
             fprintf(stderr, "Snapshot name cannot contain '/'!\n");
             return EXIT_FAILURE;
         }
     }
-    strncpy(irq.snapshot_name + 1, destination, CFS_MAX_FILENAME_LENGTH - 2);
+    strncpy(irq.snapshot_name, snapshot_name, CFS_MAX_FILENAME_LENGTH - 2);
     irq.action = action_determined;
     if (ioctl(fd, CFS_PUSH_SNAPSHOT, &irq) == -1) {
         perror("ioctl");

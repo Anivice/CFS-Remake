@@ -10,6 +10,7 @@
 #include "colors.h"
 #include "generalCFSbaseError.h"
 #include "execute.h"
+#include <csignal>
 
 #define MAX_STACK_FRAMES (64)
 
@@ -200,6 +201,7 @@ std::string backtrace_level_2()
 constexpr int g_pre_defined_level = 2;
 std::string backtrace()
 {
+    std::signal(SIGPIPE, SIG_IGN);
     const auto level = cfs::utils::getenv("BACKTRACE_LEVEL");
     switch (level.empty() ? g_pre_defined_level
         : std::strtoll(level.c_str(), nullptr, 10))
