@@ -48,7 +48,7 @@ std::string cfs::utils::PreDefinedArgumentType::print_help() const
     {
         const std::string padding(max_name_len + 1 - show.name.length(), ' ');
         const std::string new_line(4 + max_name_len + 1 + 2, ' ');
-        cfs::utils::replace_all(show.description, "\n", "\n" + new_line);
+        replace_all(show.description, "\n", "\n" + new_line);
         os << "    " << show.name << padding << "  " << show.description << std::endl;
     });
     return os.str();
@@ -135,10 +135,6 @@ cfs::utils::ArgumentParser::ArgumentParser(const int argc, char **argv, const Pr
             i++;
             if (i >= argc) throw error::argument_parser_exception("Argument '", arg, "' requires a parameter but was never provided");
             const std::string param = argv[i];
-            if (!param.empty() && param.front() == '-') {
-                throw error::argument_parser_exception("Argument '", arg, "' requires a parameter but was never provided");
-            }
-
             arg_parsed.parameter = param;
         }
 

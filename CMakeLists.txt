@@ -229,7 +229,7 @@ else ()
                 -D_FORTIFY_SOURCE=2
                 -fstack-protector-strong
                 -Wl,-z,relro -Wl,-z,now
-                -s
+                # -s
                 ${CC_ADDITIONAL_OPTIONS_LIST}
         )
         set(link_args
@@ -245,7 +245,7 @@ else ()
                 -D_FORTIFY_SOURCE=2
                 -fstack-protector-strong
                 -Wl,-z,relro -Wl,-z,now
-                -s
+                # -s
                 ${LD_ADDITIONAL_OPTIONS_LIST}
         )
 

@@ -602,7 +602,9 @@ namespace cfs
                         break;
                     }
 
-                    ::write(STDOUT_FILENO, data.data(), rSize);
+                    if (rSize != ::write(STDOUT_FILENO, data.data(), rSize)) {
+                        std::cerr << "Short write!" << std::endl;
+                    }
                     offset += rSize;
                 }
             }

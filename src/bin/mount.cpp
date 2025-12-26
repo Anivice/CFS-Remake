@@ -1,17 +1,15 @@
-#define FUSE_USE_VERSION 317
-#include <fuse.h>
-#include <atomic>
-#include <algorithm>
-#include <cstdlib>
-#include <sys/ioctl.h>
-#include <pthread.h>
 #include "routes.h"
 #include "logger.h"
-#include "args.h"
-#include "CowFileSystem.h"
-#include "version.h"
 
 #ifdef CFS_COMPILE_FUSE
+# include "args.h"
+# include "CowFileSystem.h"
+# include "version.h"
+# define FUSE_USE_VERSION 317
+# include <fuse.h>
+# include <cstdlib>
+# include <sys/ioctl.h>
+# include <pthread.h>
 namespace utils = cfs::utils;
 
 utils::PreDefinedArgumentType::PreDefinedArgument mountMainArgument = {
@@ -28,9 +26,9 @@ extern "C" struct snapshot_ioctl_msg {
 };
 #define CFS_PUSH_SNAPSHOT _IOW('M', 0x42, struct snapshot_ioctl_msg)
 
-#define CREATE      (0)
-#define ROLLBACKTO  (1)
-#define DELETE      (2)
+#define SNAPSHOT_CREATE      (0)
+#define SNAPSHOT_ROLLBACKTO  (1)
+#define SNAPSHOT_DELETE      (2)
 
 inline void set_thread_name(const char * name)
 {
@@ -39,7 +37,8 @@ inline void set_thread_name(const char * name)
 
 std::unique_ptr<cfs::CowFileSystem> cfs_entity_ptr;
 
-static int fuse_do_getattr(const char *path, struct stat *stbuf, fuse_file_info *) {
+static int fuse_do_getattr(const char *path, struct stat *stbuf, fuse_file_info *)
+{
     set_thread_name("fuse_do_getattr");
     cfs::stat cfs_stbuf{};
     const auto result = cfs_entity_ptr->do_getattr(path, &cfs_stbuf);
@@ -62,7 +61,8 @@ static int fuse_do_getattr(const char *path, struct stat *stbuf, fuse_file_info 
 static int fuse_do_readdir(const char *path,
                            void *buffer,
                            const fuse_fill_dir_t filler,
-                           off_t, fuse_file_info *, fuse_readdir_flags) {
+                           off_t, fuse_file_info *, fuse_readdir_flags)
+{
     set_thread_name("fuse_do_readdir");
     std::vector<std::string> vector_buffer;
     const int status = cfs_entity_ptr->do_readdir(path, vector_buffer);
@@ -165,7 +165,8 @@ static int fuse_do_symlink(const char *path, const char *target) {
 }
 
 static int fuse_do_ioctl(const char *, const unsigned int cmd, void *,
-                         fuse_file_info *, const unsigned int flags, void *data) {
+                         fuse_file_info *, const unsigned int flags, void *data)
+{
     set_thread_name("fuse_do_ioctl");
     if (!(flags & FUSE_IOCTL_DIR)) {
         return -ENOTTY;
@@ -173,11 +174,11 @@ static int fuse_do_ioctl(const char *, const unsigned int cmd, void *,
 
     if (cmd == CFS_PUSH_SNAPSHOT) {
         const auto *msg = static_cast<snapshot_ioctl_msg *>(data);
-        if (msg->action == CREATE) {
+        if (msg->action == SNAPSHOT_CREATE) {
             return cfs_entity_ptr->do_snapshot(msg->snapshot_name);
-        } else if (msg->action == ROLLBACKTO) {
+        } else if (msg->action == SNAPSHOT_ROLLBACKTO) {
             return cfs_entity_ptr->do_rollback(msg->snapshot_name);
-        } else if (msg->action == DELETE) {
+        } else if (msg->action == SNAPSHOT_DELETE) {
             return cfs_entity_ptr->do_cleanup(msg->snapshot_name);
         }
     }
@@ -185,7 +186,8 @@ static int fuse_do_ioctl(const char *, const unsigned int cmd, void *,
     return -EINVAL;
 }
 
-static int fuse_do_rename(const char *path, const char *name, unsigned int flags) {
+static int fuse_do_rename(const char *path, const char *name, unsigned int flags)
+{
     set_thread_name("fuse_do_rename");
     if (flags == RENAME_NOREPLACE) {
         return cfs_entity_ptr->do_rename(path, name, 0);
@@ -197,12 +199,14 @@ static int fuse_do_rename(const char *path, const char *name, unsigned int flags
 }
 
 static int fuse_do_fallocate(const char *path, const int mode, const off_t offset, const off_t length,
-                             fuse_file_info *) {
+                             fuse_file_info *)
+{
     set_thread_name("fuse_do_fallocate");
     return cfs_entity_ptr->do_fallocate(path, mode, offset, length);
 }
 
-static int fuse_do_readlink(const char *path, char *buffer, const size_t size) {
+static int fuse_do_readlink(const char *path, char *buffer, const size_t size)
+{
     set_thread_name("fuse_do_readlink");
     return cfs_entity_ptr->do_readlink(path, buffer, size);
 }
@@ -211,56 +215,28 @@ void fuse_do_destroy(void *) {
     set_thread_name("fuse_do_destroy");
 }
 
-void *fuse_do_init(fuse_conn_info *conn, fuse_config *) {
+void *fuse_do_init(fuse_conn_info *conn, fuse_config *)
+{
     set_thread_name("fuse_do_init");
     fuse_set_feature_flag(conn, FUSE_CAP_IOCTL_DIR);
     conn->max_write = 256 * 1024 * 1024;
     return nullptr;
 }
 
-static int fuse_do_mknod(const char *path, const mode_t mode, const dev_t device) {
+static int fuse_do_mknod(const char *path, const mode_t mode, const dev_t device)
+{
     set_thread_name("fuse_do_mknod");
     return cfs_entity_ptr->do_mknod(path, mode, device);
 }
 
-int fuse_statfs(const char *, struct statvfs *status) {
+int fuse_statfs(const char *, struct statvfs *status)
+{
     set_thread_name("fuse_statfs");
     *status = cfs_entity_ptr->do_fstat();
     return 0;
 }
 
-static fuse_operations fuse_operation_vector_table =
-{
-    .getattr = fuse_do_getattr,
-    .readlink = fuse_do_readlink,
-    .mknod = fuse_do_mknod,
-    .mkdir = fuse_do_mkdir,
-    .unlink = fuse_do_unlink,
-    .rmdir = fuse_do_rmdir,
-    .symlink = fuse_do_symlink,
-    .rename = fuse_do_rename,
-    .chmod = fuse_do_chmod,
-    .chown = fuse_do_chown,
-    .truncate = fuse_do_truncate,
-    .open = fuse_do_open,
-    .read = fuse_do_read,
-    .write = fuse_do_write,
-    .statfs = fuse_statfs,
-    .flush = fuse_do_flush,
-    .release = fuse_do_release,
-    .fsync = fuse_do_fsync,
-    .opendir = fuse_do_open,
-    .readdir = fuse_do_readdir,
-    .releasedir = fuse_do_releasedir,
-    .fsyncdir = fuse_do_fsyncdir,
-    .init = fuse_do_init,
-    .destroy = fuse_do_destroy,
-    .access = fuse_do_access,
-    .create = fuse_do_create,
-    .utimens = fuse_do_utimens,
-    .ioctl = fuse_do_ioctl,
-    .fallocate = fuse_do_fallocate,
-};
+static fuse_operations fuse_operation_vector_table { };
 
 int fuse_redirect(const int argc, char ** argv)
 {
@@ -291,6 +267,36 @@ static std::vector<std::string> splitString(const std::string& s, const char del
 
 int mount_main(int argc, char **argv)
 {
+    fuse_operation_vector_table.getattr = fuse_do_getattr;
+    fuse_operation_vector_table.readlink = fuse_do_readlink;
+    fuse_operation_vector_table.mknod = fuse_do_mknod;
+    fuse_operation_vector_table.mkdir = fuse_do_mkdir;
+    fuse_operation_vector_table.unlink = fuse_do_unlink;
+    fuse_operation_vector_table.rmdir = fuse_do_rmdir;
+    fuse_operation_vector_table.symlink = fuse_do_symlink;
+    fuse_operation_vector_table.rename = fuse_do_rename;
+    fuse_operation_vector_table.chmod = fuse_do_chmod;
+    fuse_operation_vector_table.chown = fuse_do_chown;
+    fuse_operation_vector_table.truncate = fuse_do_truncate;
+    fuse_operation_vector_table.open = fuse_do_open;
+    fuse_operation_vector_table.read = fuse_do_read;
+    fuse_operation_vector_table.write = fuse_do_write;
+    fuse_operation_vector_table.statfs = fuse_statfs;
+    fuse_operation_vector_table.flush = fuse_do_flush;
+    fuse_operation_vector_table.release = fuse_do_release;
+    fuse_operation_vector_table.fsync = fuse_do_fsync;
+    fuse_operation_vector_table.opendir = fuse_do_open;
+    fuse_operation_vector_table.readdir = fuse_do_readdir;
+    fuse_operation_vector_table.releasedir = fuse_do_releasedir;
+    fuse_operation_vector_table.fsyncdir = fuse_do_fsyncdir;
+    fuse_operation_vector_table.init = fuse_do_init;
+    fuse_operation_vector_table.destroy = fuse_do_destroy;
+    fuse_operation_vector_table.access = fuse_do_access;
+    fuse_operation_vector_table.create = fuse_do_create;
+    fuse_operation_vector_table.utimens = fuse_do_utimens;
+    fuse_operation_vector_table.ioctl = fuse_do_ioctl;
+    fuse_operation_vector_table.fallocate = fuse_do_fallocate;
+
     try
     {
         const utils::PreDefinedArgumentType PreDefinedArguments(mountMainArgument);
