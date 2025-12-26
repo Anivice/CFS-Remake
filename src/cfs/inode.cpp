@@ -560,7 +560,33 @@ void cfs::dentry_t::snapshot(const std::string &name)
     dentry_map_reversed_search_map_.emplace(new_inode_index, name);
     save_dentry_unblocked();
 
+    // TODO: Dump attribute map, that way we can compare two attribute maps and see just which block is deallocated
+    // TODO: in which generation. that will help clean up process
+    // dump bitmap
+    const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
     auto bitmap_dump = inode_construct_info_.block_manager->dump_bitmap_data();
+    // remove all cow blocks from this bitmap
+    class per_snapshot_bitmap_t : public bitmap_base {
+    public:
+        explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
+        {
+            init_data_array = [&](const uint64_t)->bool
+            {
+                data_array_ = data;
+                return true;
+            };
+
+            init(size);
+        }
+    } per_snapshot_bitmap(bitmap_dump.data(), // bitmap start
+        map_size); // particles. bytes are calculated automatically
+
+    for (uint64_t i = 0; i < map_size; i++) {
+        if (per_snapshot_bitmap.get_bit(i) && inode_construct_info_.block_attribute->get<block_type>(i) == COW_REDUNDANCY_BLOCK) {
+            per_snapshot_bitmap.set_bit(i, false); // remove it when it's just CoW
+        }
+    }
+
     /// now, we need to replace target dump with our current bitmap dump
     const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
     const uint64_t map_start = old_dentry_start_ - map_bytes;
@@ -599,6 +625,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
             if (attr.block_status == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                 inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
             }
+
             if (attr.block_type != COW_REDUNDANCY_BLOCK) {
                 inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
             }
@@ -695,11 +722,15 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     const auto ptr = dentry_map_.find(name);
     cfs_assert_simple(ptr != dentry_map_.end());
     uint64_t target_index = ptr->second;
+    const uint64_t old_index_reference = target_index;
 
     cfs_inode_service_t::linearized_block_t occupied_blocks;
+    tsl::hopscotch_map<uint64_t, std::vector<uint8_t>> bitmaps_from_all_snapshots;
+    const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
 
+    auto read_bitmap_from_snapshot_entry_point = [&](const uint64_t snapshot_entry_index)
     {
-        dentry_t dentry = dentry_t(target_index,
+        auto dentry = dentry_t(snapshot_entry_index,
             inode_construct_info_.parent_fs_governor,
             inode_construct_info_.block_manager,
             inode_construct_info_.journal,
@@ -707,13 +738,23 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
             this); // construct target child
         const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
         const uint64_t map_start = dentry.dentry_start_ - map_bytes;
-        const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
         std::vector<uint8_t> per_snapshot_fs_info(map_bytes);
-        dentry.read((char*)per_snapshot_fs_info.data(), map_bytes, map_start);
+        dentry.read(reinterpret_cast<char *>(per_snapshot_fs_info.data()), map_bytes, map_start);
+        bitmaps_from_all_snapshots.emplace(snapshot_entry_index, per_snapshot_fs_info);
+    };
 
-        // venture and iterate through the whole system
-        // without bitmap, we have to iterate through by inode
-        // but with bitmap, we can simply use that
+    for (const auto & pointer: dentry_map_ | std::views::values)
+    {
+        if (inode_construct_info_.block_attribute->get<block_status>(pointer)
+            == BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01)
+        {
+            read_bitmap_from_snapshot_entry_point(pointer);
+        }
+    }
+
+    tsl::hopscotch_map<uint64_t /* block number */, uint64_t /* overlapping count */> bitmap_overview_map;
+    auto record_bitmap = [&](std::vector<uint8_t> bitmap_data, const uint64_t bitmap_particles)
+    {
         class per_snapshot_bitmap_t : public bitmap_base {
         public:
             explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
@@ -726,25 +767,29 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
 
                 init(size);
             }
-        } per_snapshot_bitmap(per_snapshot_fs_info.data(), // bitmap start
-            map_size); // particles. bytes are calculated automatically
+        } per_snapshot_bitmap(bitmap_data.data(), // bitmap start
+            bitmap_particles); // particles. bytes are calculated automatically
 
-        occupied_blocks = dentry.referenced_inode_->linearize_all_blocks();
-
-        // clean up
-        for (uint64_t i = 0; i < map_size; i++)
+        for (uint64_t i = 0; i < bitmap_particles; i++)
         {
-            if (per_snapshot_bitmap.get_bit(i) && inode_construct_info_.block_attribute->get<block_type>(i) != COW_REDUNDANCY_BLOCK)
-            {
-                inode_construct_info_.block_attribute->dec<index_node_referencing_number>(i); // delink once
-                if (inode_construct_info_.block_attribute->get<index_node_referencing_number>(i) == 0)
-                {
-                    inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i); // backup block type
-                    inode_construct_info_.block_attribute->set<block_type>(i, COW_REDUNDANCY_BLOCK); // set it as redundancy
-                }
+            if (per_snapshot_bitmap.get_bit(i)) {
+                bitmap_overview_map[i]++;
             }
         }
+    };
 
+    std::ranges::for_each(bitmaps_from_all_snapshots | std::views::values, [&](const std::vector<uint8_t> & bitmap_data) {
+        record_bitmap(bitmap_data, map_size);
+    });
+
+    {
+        auto dentry = dentry_t(target_index,
+            inode_construct_info_.parent_fs_governor,
+            inode_construct_info_.block_manager,
+            inode_construct_info_.journal,
+            inode_construct_info_.block_attribute,
+            this); // construct target child
+        occupied_blocks = dentry.referenced_inode_->linearize_all_blocks();
         target_index = dentry.current_referenced_inode_; // update reference
     }
 
@@ -767,10 +812,104 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     dentry_map_reversed_search_map_.erase(target_index);
     save_dentry_unblocked();
 
-    uint64_t non_cow_blocks = 0;
+    // static field. no CoW after this
 
-    // we reverted, created a new root, that means frozen blocks are, again, relinked once more
-    for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
+    // record active bitmap data
+    {
+        std::vector<uint8_t> active_bitmap_suite = inode_construct_info_.block_manager->dump_bitmap_data();
+        class per_snapshot_bitmap_t : public bitmap_base {
+        public:
+            explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
+            {
+                init_data_array = [&](const uint64_t)->bool
+                {
+                    data_array_ = data;
+                    return true;
+                };
+
+                init(size);
+            }
+        } per_snapshot_bitmap(active_bitmap_suite.data(), // bitmap start
+            map_size); // particles. bytes are calculated automatically
+
+        for (uint64_t i = 0; i < map_size; i++)
+        {
+            if (per_snapshot_bitmap.get_bit(i)
+                && inode_construct_info_.block_attribute->get<block_type>(i) == COW_REDUNDANCY_BLOCK) // remove redundancies
+            {
+                per_snapshot_bitmap.set_bit(i, false);
+            }
+        }
+
+        record_bitmap(active_bitmap_suite, map_size);
+    }
+
+    // dry run, remove blocks referenced by snapshot and no others
+    {
+        class per_snapshot_bitmap_t : public bitmap_base {
+        public:
+            explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
+            {
+                init_data_array = [&](const uint64_t)->bool
+                {
+                    data_array_ = data;
+                    return true;
+                };
+
+                init(size);
+            }
+        } per_snapshot_bitmap(bitmaps_from_all_snapshots.at(old_index_reference).data(), // bitmap start
+            map_size); // particles. bytes are calculated automatically
+
+        if (bitmaps_from_all_snapshots.size() > 1)
+        {
+            for (uint64_t i = 0; i < map_size; i++)
+            {
+                // present in this bitmap
+                if (per_snapshot_bitmap.get_bit(i)) {
+                    bitmap_overview_map[i]--;
+                }
+            }
+        }
+        else if (bitmaps_from_all_snapshots.size() == 1) // if only one snapshot is left, this means...
+        {
+            for (uint64_t i = 0; i < map_size; i++)
+            {
+                // present in this bitmap
+                if (per_snapshot_bitmap.get_bit(i)) {
+                    bitmap_overview_map[i]--;
+                }
+            }
+        }
+    }
+
+    for (uint64_t i = 0; i < map_size; i++) {
+        if (inode_construct_info_.block_manager->blk_at(i)) {
+            inode_construct_info_.block_attribute->set<index_node_referencing_number>(i, 0); // place holder
+        }
+    }
+
+    // now, bitmap_overview_map is the processed map
+    for (const auto & [index, references] : bitmap_overview_map) {
+        inode_construct_info_.block_attribute->set<index_node_referencing_number>(index, references); // set the corresponding reference
+    }
+
+    // see which ones are not yet set to redundancy
+    for (uint64_t i = 0; i < map_size; i++)
+    {
+        if (inode_construct_info_.block_manager->blk_at(i))
+        {
+            const auto attr = inode_construct_info_.block_attribute->get(i);
+            if (attr.index_node_referencing_number == 0 && attr.block_type != COW_REDUNDANCY_BLOCK) {
+                inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i);
+                inode_construct_info_.block_attribute->set<block_type>(i, COW_REDUNDANCY_BLOCK); // CoW this block
+            }
+        }
+    }
+
+    // update corresponding flags
+    uint64_t non_cow_blocks = 0;
+    for (uint64_t i = 0; i < map_size; i++)
     {
         const auto attr = inode_construct_info_.block_attribute->get(i);
         if (inode_construct_info_.block_manager->blk_at(i)) {

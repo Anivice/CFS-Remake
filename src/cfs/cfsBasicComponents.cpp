@@ -629,6 +629,7 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                 std::memcpy(parent_blk_lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
                 if (new_parent != parent_blk) {
                     if (block_attribute_->get<block_status>(parent_blk) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                        block_attribute_->move<block_type, block_type_cow>(parent_blk);
                         block_attribute_->set<block_type>(parent_blk, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
                     } else {
                         block_attribute_->dec<index_node_referencing_number>(parent_blk);
@@ -804,6 +805,7 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
         copy_to_buffer(lock->data() + w_off, w_size);
         if (new_blk != index) {
             if (block_attribute_->get<block_status>(index) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                block_attribute_->move<block_type, block_type_cow>(index);
                 block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
             } else {
                 block_attribute_->dec<index_node_referencing_number>(index);
