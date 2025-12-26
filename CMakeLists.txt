@@ -287,3 +287,6 @@ if("${DEBUG_TIV_SHOW}" STREQUAL "True")
     target_link_libraries(show PRIVATE tiv)
     add_dependencies(test_all show)
 endif ()
+
+add_executable(snapshot src/bin/snapshot.c)
+add_dependencies(cfs snapshot)
