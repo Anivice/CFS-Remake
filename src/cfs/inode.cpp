@@ -124,7 +124,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
     if (parent_inode_ != nullptr)
     {
         const auto new_inode_num_ = parent_inode_->copy_on_write_invoked_from_child(current_referenced_inode_, my_data); // upload
-        dlog("copy-on-write, block=", current_referenced_inode_, ", redirect=", new_inode_num_, ", parent=", parent_inode_->current_referenced_inode_, "\n");
+        // dlog("copy-on-write, block=", current_referenced_inode_, ", redirect=", new_inode_num_, ", parent=", parent_inode_->current_referenced_inode_, "\n");
         if (new_inode_num_ != current_referenced_inode_) // I got referenced
         {
             const auto old_ = current_referenced_inode_;
@@ -147,9 +147,9 @@ void cfs::inode_t::copy_on_write() // CoW entry
     }
     else
     {
-        dlog("/: copy-on-write, block=", current_referenced_inode_);
+        // dlog("/: copy-on-write, block=", current_referenced_inode_);
         root_cow();
-        dlog(", redirect=", current_referenced_inode_, "\n");
+        // dlog(", redirect=", current_referenced_inode_, "\n");
     }
 }
 
@@ -201,13 +201,13 @@ void cfs::inode_t::root_cow()
     // [DENTRY ENTRY]
 
     const auto bitmap_dump = referenced_inode_->block_manager_->dump_bitmap_data();
-    const auto attribute_dump = referenced_inode_->block_attribute_->dump();
+    // const auto attribute_dump = referenced_inode_->block_attribute_->dump();
     std::vector<uint8_t> inode_metadata(referenced_inode_->block_size_);
     std::memcpy(inode_metadata.data(), referenced_inode_->inode_effective_lock_.data(),
                 referenced_inode_->inode_effective_lock_.size());
     /// no static data, yet
 
-    data_.resize(bitmap_dump.size() + attribute_dump.size() + inode_metadata.size()); // we keep this buffer
+    data_.resize(bitmap_dump.size() /* + attribute_dump.size() */ + inode_metadata.size()); // we keep this buffer
     /// so that less malloc is called
     /// data will be overwritten anyway so
 
@@ -218,7 +218,7 @@ void cfs::inode_t::root_cow()
     };
 
     write_to_buffer(bitmap_dump);
-    write_to_buffer(attribute_dump);
+    // write_to_buffer(attribute_dump);
     write_to_buffer(inode_metadata);
     const std::vector<uint8_t> empty((static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size, 0);
 
@@ -289,8 +289,8 @@ uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index
     referenced_inode_->resize(dentry_start_); // clear old data
     save_dentry_unblocked(); // write
 
-    dlog("copy-on-write child-relink, child block=", cow_index, ", child redirect=", new_block,
-        ", parent (me)=", current_referenced_inode_, " (from=", old_, ", name=", name, ")\n");
+    // dlog("copy-on-write child-relink, child block=", cow_index, ", child redirect=", new_block,
+        // ", parent (me)=", current_referenced_inode_, " (from=", old_, ", name=", name, ")\n");
     // return the new block to child
     return new_block;
 }
@@ -631,9 +631,6 @@ void cfs::dentry_t::revert(const std::string &name)
                 inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i);
                 inode_construct_info_.block_attribute->set<block_type>(i, COW_REDUNDANCY_BLOCK);
             }
-
-            // we will remove a root, that means everyone has one less snapshot inode reference
-            inode_construct_info_.block_attribute->dec<index_node_referencing_number>(i);
         }
     }
 
@@ -675,15 +672,10 @@ void cfs::dentry_t::revert(const std::string &name)
 
     uint64_t non_cow_blocks = 0;
 
-    // we reverted, created a new root, that means frozen blocks are, again, relinked once more
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
         const auto attr = inode_construct_info_.block_attribute->get(i);
-        if (inode_construct_info_.block_manager->blk_at(i) )
-        {
-            if (attr.block_status != BLOCK_AVAILABLE_TO_MODIFY_0x00) {
-                inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
-            }
+        if (inode_construct_info_.block_manager->blk_at(i)) {
             non_cow_blocks += (attr.block_type != 0x00) ? 1 : 0;
         }
     }
@@ -744,7 +736,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         {
             if (per_snapshot_bitmap.get_bit(i) && inode_construct_info_.block_attribute->get<block_type>(i) != COW_REDUNDANCY_BLOCK)
             {
-                inode_construct_info_.block_manager->deallocate(i);
+                inode_construct_info_.block_attribute->dec<index_node_referencing_number>(i); // delink once
                 if (inode_construct_info_.block_attribute->get<index_node_referencing_number>(i) == 0)
                 {
                     inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i); // backup block type

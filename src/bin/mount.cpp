@@ -39,22 +39,26 @@ std::unique_ptr<cfs::CowFileSystem> cfs_entity_ptr;
 
 static int fuse_do_getattr(const char *path, struct stat *stbuf, fuse_file_info *)
 {
-    set_thread_name("fuse_do_getattr");
-    cfs::stat cfs_stbuf{};
-    const auto result = cfs_entity_ptr->do_getattr(path, &cfs_stbuf);
-    stbuf->st_dev = cfs_stbuf.st_dev;
-    stbuf->st_ino = cfs_stbuf.st_ino;
-    stbuf->st_nlink = cfs_stbuf.st_nlink;
-    stbuf->st_mode = cfs_stbuf.st_mode;
-    stbuf->st_uid = cfs_stbuf.st_uid;
-    stbuf->st_gid = cfs_stbuf.st_gid;
-    stbuf->st_rdev = cfs_stbuf.st_rdev;
-    stbuf->st_size = cfs_stbuf.st_size;
-    stbuf->st_blksize = cfs_stbuf.st_blksize;
-    stbuf->st_blocks = cfs_stbuf.st_blocks;
-    stbuf->st_atim = cfs_stbuf.st_atim;
-    stbuf->st_mtim = cfs_stbuf.st_mtim;
-    stbuf->st_ctim = cfs_stbuf.st_ctim;
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_getattr");
+        cfs::stat cfs_stbuf{};
+        result = cfs_entity_ptr->do_getattr(path, &cfs_stbuf);
+        stbuf->st_dev = cfs_stbuf.st_dev;
+        stbuf->st_ino = cfs_stbuf.st_ino;
+        stbuf->st_nlink = cfs_stbuf.st_nlink;
+        stbuf->st_mode = cfs_stbuf.st_mode;
+        stbuf->st_uid = cfs_stbuf.st_uid;
+        stbuf->st_gid = cfs_stbuf.st_gid;
+        stbuf->st_rdev = cfs_stbuf.st_rdev;
+        stbuf->st_size = cfs_stbuf.st_size;
+        stbuf->st_blksize = cfs_stbuf.st_blksize;
+        stbuf->st_blocks = cfs_stbuf.st_blocks;
+        stbuf->st_atim = cfs_stbuf.st_atim;
+        stbuf->st_mtim = cfs_stbuf.st_mtim;
+        stbuf->st_ctim = cfs_stbuf.st_ctim;
+    });
+    if (T0.joinable()) T0.join();
     return result;
 }
 
@@ -63,177 +67,333 @@ static int fuse_do_readdir(const char *path,
                            const fuse_fill_dir_t filler,
                            off_t, fuse_file_info *, fuse_readdir_flags)
 {
-    set_thread_name("fuse_do_readdir");
-    std::vector<std::string> vector_buffer;
-    const int status = cfs_entity_ptr->do_readdir(path, vector_buffer);
-    if (status != 0) return status;
-    for (const auto &name: vector_buffer) {
-        filler(buffer, name.c_str(), nullptr, 0, FUSE_FILL_DIR_DEFAULTS);
-    }
-    return status;
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_readdir");
+        std::vector<std::string> vector_buffer;
+        result = cfs_entity_ptr->do_readdir(path, vector_buffer);
+        if (result != 0) return;
+        for (const auto &name: vector_buffer) {
+            filler(buffer, name.c_str(), nullptr, 0, FUSE_FILL_DIR_DEFAULTS);
+        }
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_mkdir(const char *path, const mode_t mode) {
-    set_thread_name("fuse_do_mkdir");
-    return cfs_entity_ptr->do_mkdir(path, mode);
+static int fuse_do_mkdir(const char *path, const mode_t mode)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_mkdir");
+        result = cfs_entity_ptr->do_mkdir(path, mode);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_chmod(const char *path, const mode_t mode, fuse_file_info *) {
-    set_thread_name("fuse_do_chmod");
-    return cfs_entity_ptr->do_chmod(path, mode);
+static int fuse_do_chmod(const char *path, const mode_t mode, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_chmod");
+        result = cfs_entity_ptr->do_chmod(path, mode);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_chown(const char *path, const uid_t uid, const gid_t gid, fuse_file_info *) {
-    set_thread_name("fuse_do_chown");
-    return cfs_entity_ptr->do_chown(path, uid, gid);
+static int fuse_do_chown(const char *path, const uid_t uid, const gid_t gid, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_chown");
+        result = cfs_entity_ptr->do_chown(path, uid, gid);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_create(const char *path, const mode_t mode, fuse_file_info *) {
-    set_thread_name("fuse_do_create");
-    return cfs_entity_ptr->do_create(path, mode);
+static int fuse_do_create(const char *path, const mode_t mode, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_create");
+        result = cfs_entity_ptr->do_create(path, mode);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_flush(const char *, fuse_file_info *) {
-    set_thread_name("fuse_do_flush");
-    return cfs_entity_ptr->do_flush();
+static int fuse_do_flush(const char *, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_flush");
+        result = cfs_entity_ptr->do_flush();
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_release(const char *path, fuse_file_info *) {
-    set_thread_name("fuse_do_release");
-    return cfs_entity_ptr->do_release(path);
+static int fuse_do_release(const char *path, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_release");
+        result = cfs_entity_ptr->do_release(path);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_access(const char *path, const int mode) {
-    set_thread_name("fuse_do_access");
-    return cfs_entity_ptr->do_access(path, mode);
+static int fuse_do_access(const char *path, const int mode)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_access");
+        result = cfs_entity_ptr->do_access(path, mode);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_open(const char *path, fuse_file_info *) {
-    set_thread_name("fuse_do_open");
-    return cfs_entity_ptr->do_open(path);
+static int fuse_do_open(const char *path, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_open");
+        result = cfs_entity_ptr->do_open(path);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_read(const char *path, char *buffer, const size_t size, const off_t offset, fuse_file_info *) {
-    set_thread_name("fuse_do_read");
-    return cfs_entity_ptr->do_read(path, buffer, size, offset);
+static int fuse_do_read(const char *path, char *buffer, const size_t size, const off_t offset, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_read");
+        result = cfs_entity_ptr->do_read(path, buffer, size, offset);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
 static int fuse_do_write(const char *path, const char *buffer, const size_t size, const off_t offset,
-                         fuse_file_info *) {
-    set_thread_name("fuse_do_write");
-    return cfs_entity_ptr->do_write(path, buffer, size, offset);
+                         fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_write");
+        result = cfs_entity_ptr->do_write(path, buffer, size, offset);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_utimens(const char *path, const timespec tv[2], fuse_file_info *fi) {
-    set_thread_name("fuse_do_utimens");
-    return cfs_entity_ptr->do_utimens(path, tv);
+static int fuse_do_utimens(const char *path, const timespec tv[2], fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_utimens");
+        result = cfs_entity_ptr->do_utimens(path, tv);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_unlink(const char *path) {
-    set_thread_name("fuse_do_unlink");
-    return cfs_entity_ptr->do_unlink(path);
+static int fuse_do_unlink(const char *path)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_unlink");
+        result = cfs_entity_ptr->do_unlink(path);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_rmdir(const char *path) {
-    set_thread_name("fuse_do_rmdir");
-    return cfs_entity_ptr->do_rmdir(path);
+static int fuse_do_rmdir(const char *path)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_rmdir");
+        result = cfs_entity_ptr->do_rmdir(path);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_fsync(const char *path, int, fuse_file_info *) {
-    set_thread_name("fuse_do_fsync");
-    return cfs_entity_ptr->do_fsync(path, 0);
+static int fuse_do_fsync(const char *path, int, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_fsync");
+        result = cfs_entity_ptr->do_fsync(path, 0);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_releasedir(const char *path, fuse_file_info *) {
-    set_thread_name("fuse_do_releasedir");
-    return cfs_entity_ptr->do_releasedir(path);
+static int fuse_do_releasedir(const char *path, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_releasedir");
+        result = cfs_entity_ptr->do_releasedir(path);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_fsyncdir(const char *path, int, fuse_file_info *) {
-    set_thread_name("fuse_do_fsyncdir");
-    return cfs_entity_ptr->do_fsyncdir(path, 0);
+static int fuse_do_fsyncdir(const char *path, int, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_fsyncdir");
+        result = cfs_entity_ptr->do_fsyncdir(path, 0);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_truncate(const char *path, const off_t size, fuse_file_info *) {
-    set_thread_name("fuse_do_truncate");
-    return cfs_entity_ptr->do_truncate(path, size);
+static int fuse_do_truncate(const char *path, const off_t size, fuse_file_info *)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_truncate");
+        result = cfs_entity_ptr->do_truncate(path, size);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-static int fuse_do_symlink(const char *path, const char *target) {
-    set_thread_name("fuse_do_symlink");
-    return cfs_entity_ptr->do_symlink(path, target);
+static int fuse_do_symlink(const char *path, const char *target)
+{
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_symlink");
+        result = cfs_entity_ptr->do_symlink(path, target);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
 static int fuse_do_ioctl(const char *, const unsigned int cmd, void *,
                          fuse_file_info *, const unsigned int flags, void *data)
 {
-    set_thread_name("fuse_do_ioctl");
-    if (!(flags & FUSE_IOCTL_DIR)) {
-        return -ENOTTY;
-    }
-
-    if (cmd == CFS_PUSH_SNAPSHOT)
+    int result;
+    std::thread T0([&]
     {
-        const auto *msg = static_cast<snapshot_ioctl_msg *>(data);
-        if (msg->action == SNAPSHOT_CREATE) {
-            return cfs_entity_ptr->do_snapshot(msg->snapshot_name);
-        } else if (msg->action == SNAPSHOT_ROLLBACKTO) {
-            return cfs_entity_ptr->do_rollback(msg->snapshot_name);
-        } else if (msg->action == SNAPSHOT_DELETE) {
-            return cfs_entity_ptr->do_cleanup(msg->snapshot_name);
+        set_thread_name("fuse_do_ioctl");
+        if (!(flags & FUSE_IOCTL_DIR)) {
+            result = -ENOTTY;
+            return;
         }
-    }
 
-    return -EINVAL;
+        if (cmd == CFS_PUSH_SNAPSHOT)
+        {
+            const auto *msg = static_cast<snapshot_ioctl_msg *>(data);
+            if (msg->action == SNAPSHOT_CREATE) {
+                result = cfs_entity_ptr->do_snapshot(msg->snapshot_name);
+                return;
+            } else if (msg->action == SNAPSHOT_ROLLBACKTO) {
+                result = cfs_entity_ptr->do_rollback(msg->snapshot_name);
+                return;
+            } else if (msg->action == SNAPSHOT_DELETE) {
+                result = cfs_entity_ptr->do_cleanup(msg->snapshot_name);
+                return;
+            }
+        }
+
+        result = -EINVAL;
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
 static int fuse_do_rename(const char *path, const char *name, unsigned int flags)
 {
-    set_thread_name("fuse_do_rename");
-    if (flags == RENAME_NOREPLACE) {
-        return cfs_entity_ptr->do_rename(path, name, 0);
-    } else if (flags == RENAME_EXCHANGE) {
-        return cfs_entity_ptr->do_rename(path, name, 1);
-    } else {
-        return cfs_entity_ptr->do_rename(path, name, 1); // default
-    }
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_rename");
+        if (flags == RENAME_NOREPLACE) {
+            result = cfs_entity_ptr->do_rename(path, name, 0);
+            return;
+        } else if (flags == RENAME_EXCHANGE) {
+            result = cfs_entity_ptr->do_rename(path, name, 1);
+            return;
+        } else {
+            result = cfs_entity_ptr->do_rename(path, name, 1); // default
+            return;
+        }
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
 static int fuse_do_fallocate(const char *path, const int mode, const off_t offset, const off_t length,
                              fuse_file_info *)
 {
-    set_thread_name("fuse_do_fallocate");
-    return cfs_entity_ptr->do_fallocate(path, mode, offset, length);
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_fallocate");
+        result = cfs_entity_ptr->do_fallocate(path, mode, offset, length);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
 static int fuse_do_readlink(const char *path, char *buffer, const size_t size)
 {
-    set_thread_name("fuse_do_readlink");
-    return cfs_entity_ptr->do_readlink(path, buffer, size);
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_readlink");
+        result = cfs_entity_ptr->do_readlink(path, buffer, size);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
-void fuse_do_destroy(void *) {
-    set_thread_name("fuse_do_destroy");
-}
-
-void *fuse_do_init(fuse_conn_info *conn, fuse_config *)
+void fuse_do_destroy(void *)
 {
-    set_thread_name("fuse_do_init");
-    fuse_set_feature_flag(conn, FUSE_CAP_IOCTL_DIR);
-    conn->max_write = 256 * 1024 * 1024;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_destroy");
+        cfs_entity_ptr->do_flush();
+    });
+    if (T0.joinable()) T0.join();
+}
+
+void * fuse_do_init(fuse_conn_info *conn, fuse_config *)
+{
+    std::thread T0([&] {
+        set_thread_name("fuse_do_init");
+        fuse_set_feature_flag(conn, FUSE_CAP_IOCTL_DIR);
+        conn->max_write = 256 * 1024 * 1024;
+    });
+    if (T0.joinable()) T0.join();
     return nullptr;
 }
 
 static int fuse_do_mknod(const char *path, const mode_t mode, const dev_t device)
 {
-    set_thread_name("fuse_do_mknod");
-    return cfs_entity_ptr->do_mknod(path, mode, device);
+    int result;
+    std::thread T0([&] {
+        set_thread_name("fuse_do_mknod");
+        result = cfs_entity_ptr->do_mknod(path, mode, device);
+    });
+    if (T0.joinable()) T0.join();
+    return result;
 }
 
 int fuse_statfs(const char *, struct statvfs *status)
 {
-    set_thread_name("fuse_statfs");
-    *status = cfs_entity_ptr->do_fstat();
+    std::thread T0([&] {
+        set_thread_name("fuse_statfs");
+        *status = cfs_entity_ptr->do_fstat();
+    });
+    if (T0.joinable()) T0.join();
     return 0;
 }
 
@@ -241,6 +401,7 @@ static fuse_operations fuse_operation_vector_table { };
 
 int fuse_redirect(const int argc, char ** argv)
 {
+    set_thread_name("fuse_main");
     fuse_args args = FUSE_ARGS_INIT(argc, argv);
     if (fuse_opt_parse(&args, nullptr, nullptr, nullptr) == -1)
     {
@@ -248,12 +409,16 @@ int fuse_redirect(const int argc, char ** argv)
         return EXIT_FAILURE;
     }
 
-    const int ret = fuse_main(args.argc, args.argv, &fuse_operation_vector_table, nullptr);
-    fuse_opt_free_args(&args);
+    int ret = 0;
+    std::thread T0([&]
+    {
+        set_thread_name("fuse_redirect");
+        ret = fuse_main(args.argc, args.argv, &fuse_operation_vector_table, nullptr);
+        fuse_opt_free_args(&args);
+    });
+    if (T0.joinable()) T0.join();
     return ret;
 }
-
-
 
 int mount_main(int argc, char **argv)
 {
