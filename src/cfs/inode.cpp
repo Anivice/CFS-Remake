@@ -124,6 +124,7 @@ void cfs::inode_t::copy_on_write() // CoW entry
     if (parent_inode_ != nullptr)
     {
         const auto new_inode_num_ = parent_inode_->copy_on_write_invoked_from_child(current_referenced_inode_, my_data); // upload
+        dlog("copy-on-write, block=", current_referenced_inode_, ", redirect=", new_inode_num_, ", parent=", parent_inode_->get_stat().st_ino, "\n");
         if (new_inode_num_ != current_referenced_inode_) // I got referenced
         {
             const auto old_ = current_referenced_inode_;
@@ -146,7 +147,9 @@ void cfs::inode_t::copy_on_write() // CoW entry
     }
     else
     {
+        dlog("ROOT: copy-on-write, block=", current_referenced_inode_);
         root_cow();
+        dlog("redirect=", current_referenced_inode_, "\n");
     }
 }
 
@@ -161,7 +164,6 @@ void cfs::inode_t::root_cow()
                                                      .block_type = INDEX_NODE_BLOCK,
                                                      .block_type_cow = 0,
                                                      .allocation_oom_scan_per_refresh_count = 0,
-                                                     .newly_allocated_thus_no_cow = 0,
                                                      .index_node_referencing_number = 1,
                                                      .block_checksum = 0,
                                                  });
@@ -252,49 +254,41 @@ uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index
     cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
         != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
 
-    /// check if child needs a reference
-    if (!inode_construct_info_.block_attribute->get<newly_allocated_thus_no_cow>(cow_index)
-        || inode_construct_info_.block_attribute->get<block_status>(cow_index) != BLOCK_AVAILABLE_TO_MODIFY_0x00)
-    {
-        // now, we start to change current dentry reference
-        const auto ptr = dentry_map_reversed_search_map_.find(cow_index);
-        cfs_assert_simple(ptr != dentry_map_reversed_search_map_.end());
-        const auto name = ptr->second;
-        dentry_map_reversed_search_map_.erase(ptr);
-        const auto ptr_ = dentry_map_.find(name);
-        cfs_assert_simple(ptr_ != dentry_map_.end());
-        dentry_map_.erase(ptr_);
+    // now, we start to change current dentry reference
+    const auto ptr = dentry_map_reversed_search_map_.find(cow_index);
+    cfs_assert_simple(ptr != dentry_map_reversed_search_map_.end());
+    const auto name = ptr->second;
+    dentry_map_reversed_search_map_.erase(ptr);
+    const auto ptr_ = dentry_map_.find(name);
+    cfs_assert_simple(ptr_ != dentry_map_.end());
+    dentry_map_.erase(ptr_);
 
-        // copy over
-        const auto new_block = inode_construct_info_.block_manager->allocate();
-        const auto new_lock = referenced_inode_->lock_page(new_block);
-        cfs_assert_simple(content.size() == static_info_->block_size);
-        std::memcpy(new_lock->data(), content.data(), content.size());
-        // set attributes
-        inode_construct_info_.block_attribute->clear(new_block, {
-                                                         .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-                                                         .block_type = INDEX_NODE_BLOCK,
-                                                         .block_type_cow = 0,
-                                                         .allocation_oom_scan_per_refresh_count = 0,
-                                                         .newly_allocated_thus_no_cow = 0,
-                                                         .index_node_referencing_number = 1,
-                                                         .block_checksum = 0,
-                                                     });
-        // child old block redefined as cow by themselves
+    // copy over
+    const auto new_block = inode_construct_info_.block_manager->allocate();
+    const auto new_lock = referenced_inode_->lock_page(new_block);
+    cfs_assert_simple(content.size() == static_info_->block_size);
+    std::memcpy(new_lock->data(), content.data(), content.size());
+    // set attributes
+    inode_construct_info_.block_attribute->clear(new_block, {
+                                                     .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+                                                     .block_type = INDEX_NODE_BLOCK,
+                                                     .block_type_cow = 0,
+                                                     .allocation_oom_scan_per_refresh_count = 0,
+                                                     .index_node_referencing_number = 1,
+                                                     .block_checksum = 0,
+                                                 });
+    // child old block redefined as cow by themselves
 
-        // new pair: name, new_block, relink here
-        dentry_map_.emplace(name, new_block);
-        dentry_map_reversed_search_map_.emplace(new_block, name);
+    // new pair: name, new_block, relink here
+    dentry_map_.emplace(name, new_block);
+    dentry_map_reversed_search_map_.emplace(new_block, name);
 
-        // write to dentry
-        referenced_inode_->resize(dentry_start_); // clear old data
-        save_dentry_unblocked(); // write
+    // write to dentry
+    referenced_inode_->resize(dentry_start_); // clear old data
+    save_dentry_unblocked(); // write
 
-        // return the new block to child
-        return new_block;
-    }
-
-    return cow_index; // now reference, return their own CoW
+    // return the new block to child
+    return new_block;
 }
 
 cfs::inode_t::inode_t(
@@ -434,21 +428,18 @@ void cfs::dentry_t::unlink(const std::string & name)
     cfs_assert_simple(it != dentry_map_.end());
     const uint64_t inode_pointer = it->second;
 
-    // remove child from dentry
-    dentry_map_.erase(it);
-    dentry_map_reversed_search_map_.erase(inode_pointer);
-    save_dentry_unblocked();
-
     if (inode_construct_info_.block_attribute->get<block_status>(inode_pointer) == BLOCK_AVAILABLE_TO_MODIFY_0x00)
     {
         /// create child inode
-        cfs_inode_service_t target(inode_pointer,
+        inode_t target(inode_pointer,
                 inode_construct_info_.parent_fs_governor,
                 inode_construct_info_.block_manager,
                 inode_construct_info_.journal,
-                inode_construct_info_.block_attribute);
+                inode_construct_info_.block_attribute,
+                this);
+        target.copy_on_write();
         target.resize(0); // remove all data in inode pointers
-        inode_construct_info_.block_manager->deallocate(inode_pointer); // remove child inode
+        inode_construct_info_.block_manager->deallocate(target.current_referenced_inode_); // remove child inode
     }
     else {
         // delink blocks one by one
@@ -469,6 +460,11 @@ void cfs::dentry_t::unlink(const std::string & name)
         delink_once(lv3);
         delink_once({inode_pointer});
     }
+
+    // remove child from dentry
+    dentry_map_.erase(name);
+    dentry_map_reversed_search_map_.erase(inode_pointer);
+    save_dentry_unblocked();
 }
 
 uint64_t cfs::dentry_t::erase_entry(const std::string &name)

@@ -162,7 +162,6 @@ namespace cfs
     class block_type { };      // => BlockType
     class block_type_cow { };
     class allocation_oom_scan_per_refresh_count { };
-    class newly_allocated_thus_no_cow { };
     class index_node_referencing_number { }; // Max 0xFFFF (65535) depth of snapshots
     class block_checksum { };
 
@@ -224,7 +223,6 @@ namespace cfs
             || std::is_same_v<Type, block_type>
             || std::is_same_v<Type, block_type_cow>
             || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-            || std::is_same_v<Type, newly_allocated_thus_no_cow>
             || std::is_same_v<Type, index_node_referencing_number>
             || std::is_same_v<Type, block_checksum>)
         uint32_t get(uint64_t index);
@@ -234,7 +232,6 @@ namespace cfs
             || std::is_same_v<Type, block_type>
             || std::is_same_v<Type, block_type_cow>
             || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-            || std::is_same_v<Type, newly_allocated_thus_no_cow>
             || std::is_same_v<Type, index_node_referencing_number>
             || std::is_same_v<Type, block_checksum>)
         void set(uint64_t index, uint32_t value);
@@ -249,14 +246,12 @@ namespace cfs
             || std::is_same_v<Type1, block_type>
             || std::is_same_v<Type1, block_type_cow>
             || std::is_same_v<Type1, allocation_oom_scan_per_refresh_count>
-            || std::is_same_v<Type1, newly_allocated_thus_no_cow>
             || std::is_same_v<Type1, index_node_referencing_number>
             || std::is_same_v<Type1, block_checksum>
             || std::is_same_v<Type2, block_status>
             || std::is_same_v<Type2, block_type>
             || std::is_same_v<Type2, block_type_cow>
             || std::is_same_v<Type2, allocation_oom_scan_per_refresh_count>
-            || std::is_same_v<Type2, newly_allocated_thus_no_cow>
             || std::is_same_v<Type2, index_node_referencing_number>
             || std::is_same_v<Type2, block_checksum>)
         void move(uint64_t index);
@@ -291,7 +286,6 @@ namespace cfs
         || std::is_same_v<Type, block_type>
         || std::is_same_v<Type, block_type_cow>
         || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-        || std::is_same_v<Type, newly_allocated_thus_no_cow>
         || std::is_same_v<Type, index_node_referencing_number>
         || std::is_same_v<Type, block_checksum>)
     uint32_t cfs_block_attribute_access_t::get(const uint64_t index)
@@ -307,9 +301,6 @@ namespace cfs
         }
         else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
             return lock(index)->allocation_oom_scan_per_refresh_count;
-        }
-        else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            return lock(index)->newly_allocated_thus_no_cow;
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
             return lock(index)->index_node_referencing_number;
@@ -328,7 +319,6 @@ namespace cfs
     || std::is_same_v<Type, block_type>
     || std::is_same_v<Type, block_type_cow>
     || std::is_same_v<Type, allocation_oom_scan_per_refresh_count>
-    || std::is_same_v<Type, newly_allocated_thus_no_cow>
     || std::is_same_v<Type, index_node_referencing_number>
     || std::is_same_v<Type, block_checksum>)
     void cfs_block_attribute_access_t::set(const uint64_t index, const uint32_t value)
@@ -356,9 +346,6 @@ namespace cfs
         else if constexpr (std::is_same_v<Type, allocation_oom_scan_per_refresh_count>) {
             lock_->allocation_oom_scan_per_refresh_count = value;
         }
-        else if constexpr (std::is_same_v<Type, newly_allocated_thus_no_cow>) {
-            lock_->newly_allocated_thus_no_cow = value;
-        }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
             lock_->index_node_referencing_number = value;
         }
@@ -376,14 +363,12 @@ namespace cfs
     || std::is_same_v<Type1, block_type>
     || std::is_same_v<Type1, block_type_cow>
     || std::is_same_v<Type1, allocation_oom_scan_per_refresh_count>
-    || std::is_same_v<Type1, newly_allocated_thus_no_cow>
     || std::is_same_v<Type1, index_node_referencing_number>
     || std::is_same_v<Type1, block_checksum>
     || std::is_same_v<Type2, block_status>
     || std::is_same_v<Type2, block_type>
     || std::is_same_v<Type2, block_type_cow>
     || std::is_same_v<Type2, allocation_oom_scan_per_refresh_count>
-    || std::is_same_v<Type2, newly_allocated_thus_no_cow>
     || std::is_same_v<Type2, index_node_referencing_number>
     || std::is_same_v<Type2, block_checksum>)
     void cfs_block_attribute_access_t::move(const uint64_t index)
@@ -404,9 +389,6 @@ namespace cfs
         }
         else if constexpr (std::is_same_v<Type1, allocation_oom_scan_per_refresh_count>) {
             val = lock_->allocation_oom_scan_per_refresh_count;
-        }
-        else if constexpr (std::is_same_v<Type1, newly_allocated_thus_no_cow>) {
-            val = lock_->newly_allocated_thus_no_cow;
         }
         else if constexpr (std::is_same_v<Type1, index_node_referencing_number>) {
             val = lock_->index_node_referencing_number;
@@ -429,9 +411,6 @@ namespace cfs
         }
         else if constexpr (std::is_same_v<Type2, allocation_oom_scan_per_refresh_count>) {
             lock_->allocation_oom_scan_per_refresh_count = val ;
-        }
-        else if constexpr (std::is_same_v<Type2, newly_allocated_thus_no_cow>) {
-            lock_->newly_allocated_thus_no_cow = val ;
         }
         else if constexpr (std::is_same_v<Type2, index_node_referencing_number>) {
             lock_->index_node_referencing_number = val ;
@@ -456,7 +435,7 @@ namespace cfs
             }
         }
         else if constexpr (std::is_same_v<Type, index_node_referencing_number>) {
-            cfs_assert_simple((lock_->index_node_referencing_number + value) < 0xFFFF); // 16 bits
+            cfs_assert_simple((lock_->index_node_referencing_number + value) < 0x1FFFF); // 17 bits
             lock_->index_node_referencing_number += value;
         }
         else {

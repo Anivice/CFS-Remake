@@ -292,7 +292,6 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
         .block_type = INDEX_NODE_BLOCK,
         .block_type_cow = 0,
         .allocation_oom_scan_per_refresh_count = 0,
-        .newly_allocated_thus_no_cow = 0,
         .index_node_referencing_number = 1,
         .block_checksum = cfs::utils::arithmetic::hash5(empty_blk.data(), empty_blk.size()),
     });

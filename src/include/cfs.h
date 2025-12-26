@@ -111,8 +111,7 @@ namespace cfs
         uint32_t block_type:2;      // => BlockType
         uint32_t block_type_cow:2;
         uint32_t allocation_oom_scan_per_refresh_count:4;
-        uint32_t newly_allocated_thus_no_cow:1;
-        uint32_t index_node_referencing_number:16; // Max 0xFFFF (65535) depth of snapshots
+        uint32_t index_node_referencing_number:17; // Max 0x1FFFF depth of snapshots
         uint32_t block_checksum:5;
     };
     static_assert(sizeof(cfs_block_attribute_t) == cfs_block_attribute_size, "Faulty attribute size");

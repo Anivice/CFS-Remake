@@ -238,7 +238,6 @@ namespace cfs
                                                              .block_type = INDEX_NODE_BLOCK,
                                                              .block_type_cow = 0,
                                                              .allocation_oom_scan_per_refresh_count = 0,
-                                                             .newly_allocated_thus_no_cow = 0,
                                                              .index_node_referencing_number = 1,
                                                              .block_checksum = 0
                                                          });

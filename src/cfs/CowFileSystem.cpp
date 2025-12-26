@@ -59,7 +59,6 @@ std::string print_attribute(const uint32_t val)
     ss << "\n";
 
     ss << "     Age:                " << std::dec << attr.allocation_oom_scan_per_refresh_count << " cycles\n";
-    ss << "     New alloc no CoW:   " << (attr.newly_allocated_thus_no_cow ? "True" : "False") << "\n";
     ss << "     Index referenced:   " << std::dec << attr.index_node_referencing_number << "\n";
     ss << "     HASH5:              " << std::hex << std::setw(2) << std::setfill('0') << attr.block_checksum << "\n";
     return ss.str();
@@ -302,8 +301,7 @@ namespace cfs
             {
                 auto pg = cfs_basic_filesystem_.lock(i + cfs_basic_filesystem_.static_info_.data_table_start);
                 const uint8_t checksum = cfs::utils::arithmetic::hash5((uint8_t*)pg.data(), pg.size());
-                const auto comp = block_attribute_.get<block_checksum>(i);
-                if (!block_attribute_.get<newly_allocated_thus_no_cow>(i) && comp != checksum) {
+                if (const auto comp = block_attribute_.get<block_checksum>(i); comp != checksum) {
                     putc(2);
                 } else {
                     putc(1);
@@ -961,6 +959,9 @@ namespace cfs
             const auto vpath = path_to_vector(path);
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
+            if (check_entry(parent, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
             child->set_atime(tv[0]);
             child->set_ctime(utils::get_timespec());
             child->set_mtime(tv[1]);
@@ -1015,6 +1016,9 @@ namespace cfs
 
             auto [child, parents]
                 = deference_inode_from_path(vpath);
+            if (check_entry(parents, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
             const auto child_stat = child->get_stat();
             child.reset();
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
@@ -1058,6 +1062,9 @@ namespace cfs
             const auto vpath = path_to_vector(path);
             const auto [child, parent]
                 = deference_inode_from_path(vpath);
+            if (check_entry(parent, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
             child->set_mtime(utils::get_timespec());
             child->set_atime(utils::get_timespec());
             child->set_ctime(utils::get_timespec());
@@ -1080,6 +1087,10 @@ namespace cfs
 
             auto [target_parent, target_parent_parents]
                 = deference_inode_from_path(target_vpath);
+
+            if (check_entry(target_parent_parents, target_parent)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
 
             const auto target_parent_stat = target_parent->get_stat();;
             target_parent.reset();
@@ -1181,6 +1192,9 @@ namespace cfs
                 source_vpath.pop_back();
                 auto [source_parent, source_parent_parents]
                     = deference_inode_from_path(source_vpath);
+                if (check_entry(source_parent_parents, source_parent)) { // not normal block
+                    return -EROFS; // Read-only filesystem (POSIX.1-2001).
+                }
                 const auto source_parent_stat = source_parent->get_stat();
                 source_parent.reset();
                 auto source_parent_inode = make_child_inode<dentry_t>(source_parent_stat.st_ino, source_parent_parents.back().get());
@@ -1195,6 +1209,9 @@ namespace cfs
                 target_vpath.pop_back();
                 auto [target_parent, target_parent_parents]
                     = deference_inode_from_path(target_vpath);
+                if (check_entry(target_parent_parents, target_parent)) { // not normal block
+                    return -EROFS; // Read-only filesystem (POSIX.1-2001).
+                }
                 const auto target_parent_stat = target_parent->get_stat();
                 target_parent.reset();
                 auto target_parent_inode = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get());
@@ -1240,6 +1257,9 @@ namespace cfs
 
             auto [child, parents]
                 = deference_inode_from_path(vpath);
+            if (check_entry(parents, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
             const auto child_stat = child->get_stat();
             child.reset();
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR)
@@ -1302,6 +1322,9 @@ namespace cfs
 
             auto [child, parents]
                 = deference_inode_from_path(vpath);
+            if (check_entry(parents, child)) { // not normal block
+                return -EROFS; // Read-only filesystem (POSIX.1-2001).
+            }
             const auto child_stat = child->get_stat();
             child.reset(); // release child, its parents are under capture (so is root) so it cannot be tempered
             if ((child_stat.st_mode & S_IFMT) == S_IFDIR)

@@ -1,4 +1,4 @@
-CFS Version 0.0.1
+CFS implementation version 0.0.1, standard version 0.0.1
 
 CFS, or Copy-on-write File System, is a tiny filesystem that is meant to
 illustrate copy-on-write mechanics serving as a proof-of-concept.

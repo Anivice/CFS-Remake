@@ -290,7 +290,6 @@ uint64_t cfs::cfs_block_manager_t::allocate()
             .block_type = STORAGE_BLOCK,
             .block_type_cow = 0,
             .allocation_oom_scan_per_refresh_count = 0,
-            .newly_allocated_thus_no_cow = 1,
             .index_node_referencing_number = 1,
             .block_checksum = 0
         });
@@ -431,32 +430,24 @@ cfs::cfs_inode_service_t::page_locker_t cfs::cfs_inode_service_t::lock_page(cons
 uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const bool linker)
 {
     cfs_assert_simple(index != block_index_); // can't CoW on my own. this should be done by dentry
-    if (!block_attribute_->get<newly_allocated_thus_no_cow>(index)
-        || block_attribute_->get<block_status>(index) != BLOCK_AVAILABLE_TO_MODIFY_0x00)
-    {
-        bool success = false;
-        const auto new_block = block_manager_->allocate();
-        block_attribute_->clear(new_block, {
-            .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-            .block_type = STORAGE_BLOCK,
-            .block_type_cow = 0,
-            .allocation_oom_scan_per_refresh_count = 0,
-            .newly_allocated_thus_no_cow = 0,
-            .index_node_referencing_number = 1,
-            .block_checksum = 0
-        });
-        g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index, new_block);
-        const auto new_ = lock_page(new_block, linker);
-        const auto old_ = lock_page(index, linker);
-        std::memcpy(new_->data(), old_->data(), block_size_);
+    bool success = false;
+    const auto new_block = block_manager_->allocate();
+    block_attribute_->clear(new_block, {
+        .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+        .block_type = STORAGE_BLOCK,
+        .block_type_cow = 0,
+        .allocation_oom_scan_per_refresh_count = 0,
+        .index_node_referencing_number = 1,
+        .block_checksum = 0
+    });
+    g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index, new_block);
+    const auto new_ = lock_page(new_block, linker);
+    const auto old_ = lock_page(index, linker);
+    std::memcpy(new_->data(), old_->data(), block_size_);
 
-        block_attribute_->move<block_type, block_type_cow>(index); // move block type in old one to cow backup
-        success = true;
-        return new_block;
-    }
-
-    block_attribute_->set<newly_allocated_thus_no_cow>(index, 0);
-    return index;
+    block_attribute_->move<block_type, block_type_cow>(index); // move block type in old one to cow backup
+    success = true;
+    return new_block;
 }
 
 cfs::cfs_inode_service_t::linearized_block_t cfs::cfs_inode_service_t::linearize_all_blocks()
@@ -535,7 +526,6 @@ cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linear
             .block_type = blk_type,
             .block_type_cow = 0,
             .allocation_oom_scan_per_refresh_count = 0,
-            .newly_allocated_thus_no_cow = 0,
             .index_node_referencing_number = 1,
             .block_checksum = 0, // just 0, newly_allocated_thus_no_cow indicated this block hasn't been modified
         });
@@ -637,7 +627,6 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                     upper[block_offset].first = new_parent;
                 }
                 std::memcpy(parent_blk_lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
-                block_attribute_->set<newly_allocated_thus_no_cow>(parent_blk, 0);
                 if (new_parent != parent_blk) {
                     if (block_attribute_->get<block_status>(parent_blk) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                         block_attribute_->set<block_type>(parent_blk, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
