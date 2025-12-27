@@ -180,16 +180,16 @@ namespace cfs
         char * data_ = nullptr;
 
     public:
-        struct stat * cfs_inode_attribute = nullptr;
+        stat * cfs_inode_attribute = nullptr;
         uint64_t * cfs_level_1_indexes = nullptr;
         const uint64_t cfs_level_1_index_numbers = 0;
 
         void convert(char * data, const uint64_t block_size)
         {
-            *(uint64_t*)&cfs_level_1_index_numbers = ((block_size - sizeof(struct stat)) / sizeof(uint64_t));
+            *const_cast<uint64_t *>(&cfs_level_1_index_numbers) = ((block_size - sizeof(stat)) / sizeof(uint64_t));
             data_ = data;
-            cfs_inode_attribute = (struct stat *)data;
-            cfs_level_1_indexes = (uint64_t *)(data + sizeof(struct stat));
+            cfs_inode_attribute = reinterpret_cast<stat *>(data);
+            cfs_level_1_indexes = reinterpret_cast<uint64_t *>(data + sizeof(stat));
         }
     };
 

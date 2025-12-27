@@ -15,7 +15,6 @@ namespace cfs
     class CowFileSystem {
     private:
         std::string cfs_pwd_ = "/";
-
         filesystem cfs_basic_filesystem_;
         cfs_journaling_t journaling_;
         cfs_bitmap_block_mirroring_t mirrored_bitmap_;

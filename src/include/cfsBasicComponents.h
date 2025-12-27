@@ -181,7 +181,7 @@ namespace cfs
             for (uint64_t i = 0; i < map_len; i++)
             {
                 uint32_t it = 0;
-                *(cfs_block_attribute_t *)(&it) = get(i);
+                *reinterpret_cast<cfs_block_attribute_t *>(&it) = get(i);
                 ret.push_back(it);
             }
 
@@ -268,7 +268,7 @@ namespace cfs
 
         void clear(const uint64_t index, const cfs_block_attribute_t & value = { })
         {
-            auto lock_ = lock(index);
+            const auto lock_ = lock(index);
 
             if (value.block_type == COW_REDUNDANCY_BLOCK && lock_->block_type != COW_REDUNDANCY_BLOCK) {
                 this->parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();

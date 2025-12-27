@@ -7,12 +7,11 @@
 #include <unistd.h>
 #include "cfsBasicComponents.h"
 #include "CowFileSystem.h"
-#include "utils.h"
 
 void cfs::bitmap_base::init(const uint64_t required_blocks)
 {
-    *(uint64_t*)&bytes_required_ = cfs::utils::arithmetic::count_cell_with_cell_size(8, required_blocks);
-    *(uint64_t*)&particles_ = required_blocks;
+    *const_cast<uint64_t *>(&bytes_required_) = utils::arithmetic::count_cell_with_cell_size(8, required_blocks);
+    *const_cast<uint64_t *>(&particles_) = required_blocks;
     cfs_assert_simple(init_data_array(bytes_required_));
 }
 
@@ -502,15 +501,20 @@ cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info
         header_temp_tail->static_info_dup   = static_info_patch;
     }
 
-    *(cfs_head_t::static_info_t*)&static_info_ = header_temp->static_info;
+    *const_cast<cfs_head_t::static_info_t *>(&static_info_) = header_temp->static_info;
 
     // init header
     cfs_header_block.parent_ = this;
-    *(uint64_t*)&cfs_header_block.tailing_header_blk_id_ = static_info_.blocks - 1;
+    *const_cast<uint64_t *>(&cfs_header_block.tailing_header_blk_id_) = static_info_.blocks - 1;
     cfs_header_block.fs_head = header_temp;
     cfs_header_block.fs_end = header_temp_tail;
-    *(uint64_t*)&bitlocker_.blocks_ = static_info_.blocks;
+    *const_cast<uint64_t *>(&bitlocker_.blocks_) = static_info_.blocks;
     bitlocker_.init();
+
+    decltype(cfs_head_t::runtime_info_t::flags) flags = { .clean = 0 };
+    static_assert(sizeof(flags) == sizeof(uint64_t));
+    cfs_header_block.set_info<cfs::flags>(*reinterpret_cast<uint64_t *>(&flags));
+    cfs_header_block.set_info<mount_timestamp>(utils::get_timestamp());
 }
 
 cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
@@ -524,6 +528,9 @@ cfs::filesystem::guard cfs::filesystem::lock(const uint64_t index)
 cfs::filesystem::~filesystem() noexcept
 {
     try {
+        decltype(cfs_head_t::runtime_info_t::flags) flags = { .clean = 1 };
+        static_assert(sizeof(flags) == sizeof(uint64_t));
+        cfs_header_block.set_info<cfs::flags>(*reinterpret_cast<uint64_t *>(&flags));
         file_.sync();
     } catch (std::exception & e) {
         elog(e.what(), "\n");
