@@ -252,7 +252,7 @@ uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index
     // check if we are a snapshot entry
     cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
         != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
-    const auto old_ = current_referenced_inode_;
+    // const auto old_ = current_referenced_inode_;
     copy_on_write();
 
     // now, we start to change current dentry reference
@@ -652,6 +652,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
                                                              BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
 
     inode_construct_info_.parent_fs_governor->sync(); // sync when snapshot
+    success = true;
 }
 
 void cfs::dentry_t::revert(const std::string &name)
@@ -739,6 +740,7 @@ void cfs::dentry_t::revert(const std::string &name)
 
     inode_construct_info_.parent_fs_governor->cfs_header_block.set_info<allocated_non_cow_blocks>(non_cow_blocks);
     inode_construct_info_.parent_fs_governor->sync(); // sync when snapshot
+    success = true;
 }
 
 void cfs::dentry_t::delete_snapshot(const std::string &name)
@@ -1065,7 +1067,6 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
             }
         }
 
-
         // mark root node
         const auto [lv1, lv2, lv3] = referenced_inode_->linearize_all_blocks();
         auto mark = [&](const std::vector<uint64_t> & p) {
@@ -1089,6 +1090,10 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
             }
         }
 
+        // since we skipped snapshot entry points, that means no additional cleanups are needed
+        // they are never referenced in the root, so they will never be added into the bitmap
+        // and the above step already freed all unmarked data in the root reference
+
         // mark all remaining as 1 ref, available to be modified
         for (uint64_t i = 0; i < map_size; i++)
         {
@@ -1101,6 +1106,12 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     }
     else // first gen, later is not root, all nodes are referenced unfortunately until in the last gen we do a proper clean up
     {
+        // this means, if you keep deleting the oldest gen, you will be forced to keep all the data since
+        // CFS has no idea which block belongs to which generation.
+        // the best practice is that, you create a snapshot of an empty system, then continue to use CFS
+        // with that snapshot present. This way, CFS can know which block belongs to which generation
+        // and everything is done with cohesive delete.
+        // But in-depth cleanups are, indeed, requires you to delete all generations, including the preceeding empty ones
         remove_snapshot_entry_occupied_blocks();
     }
 
@@ -1122,4 +1133,5 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
 
     inode_construct_info_.parent_fs_governor->cfs_header_block.set_info<allocated_non_cow_blocks>(non_cow_blocks);
     inode_construct_info_.parent_fs_governor->sync(); // sync
+    success = true;
 }
