@@ -856,9 +856,9 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     tsl::hopscotch_map<uint64_t, std::vector<uint8_t>> bitmaps_from_all_snapshots;
     tsl::hopscotch_map<uint64_t, std::vector<uint8_t>> attributes_from_all_snapshots;
     const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
-    auto read_bitmap_and_attributes_from_snapshot_entry_point = [&](const uint64_t snapshot_entry_index, dentry_t * dentry = nullptr)
+    auto read_bitmap_and_attributes_from_snapshot_entry_point = [&](const uint64_t snapshot_entry_index, const dentry_t * dentry = nullptr)
     {
-        std::unique_ptr < dentry_t > dentry_unique_ptr(dentry);
+        std::unique_ptr < dentry_t > dentry_unique_ptr;
         if (dentry == nullptr)
         {
             dentry_unique_ptr = std::make_unique<dentry_t>(snapshot_entry_index,
@@ -867,19 +867,20 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
                 inode_construct_info_.journal,
                 inode_construct_info_.block_attribute,
                 this); // construct target child
+            dentry = dentry_unique_ptr.get();
         }
 
         const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
-        const uint64_t map_start = dentry_unique_ptr->dentry_start_ - map_bytes;
+        const uint64_t map_start = dentry->dentry_start_ - map_bytes;
         const uint64_t attr_bytes = (static_info_->data_block_attribute_table_end - static_info_->data_block_attribute_table_start) * static_info_->block_size;
-        const uint64_t attr_start = dentry_unique_ptr->dentry_start_ - attr_bytes - map_bytes;
+        const uint64_t attr_start = dentry->dentry_start_ - attr_bytes - map_bytes;
 
         std::vector<uint8_t> bitmap_data(map_bytes);
-        dentry_unique_ptr->read(reinterpret_cast<char *>(bitmap_data.data()), map_bytes, map_start);
+        dentry->referenced_inode_->read(reinterpret_cast<char *>(bitmap_data.data()), map_bytes, map_start);
         bitmaps_from_all_snapshots.emplace(snapshot_entry_index, bitmap_data);
 
         std::vector<uint8_t> attributes_data(attr_bytes);
-        dentry_unique_ptr->read(reinterpret_cast<char *>(attributes_data.data()), attr_bytes, attr_start);
+        dentry->referenced_inode_->read(reinterpret_cast<char *>(attributes_data.data()), attr_bytes, attr_start);
         attributes_from_all_snapshots.emplace(snapshot_entry_index, attributes_data);
     };
 
@@ -896,7 +897,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
 
     // bitwise comparison
     tsl::hopscotch_map < uint64_t /* any of the before or after */, std::vector < result_t * > > bitwise_comparison_results;
-    std::vector < result_t > results;
+    std::vector < std::unique_ptr < result_t > > results;
     {
         const uint64_t offset_end = generation_reference_table.size() - 2;
         // say we have 3 generations {0, 1, 2}, compare [0,1], [1,2], offset end = 3 - 2
@@ -920,9 +921,9 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
             result.before = before_index;
             result.after = after_index;
 
-            results.emplace_back(result);
-            bitwise_comparison_results[before_index].emplace_back(&results.back());
-            bitwise_comparison_results[after_index].emplace_back(&results.back());
+            results.emplace_back(std::make_unique<result_t>(result));
+            bitwise_comparison_results[before_index].emplace_back(results.back().get());
+            bitwise_comparison_results[after_index].emplace_back(results.back().get());
         }
     }
 
@@ -1085,6 +1086,16 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
             {
                 // allocated, non-redundancy, BUT!, not present in root tree in any way or form
                 delete_blocks({i}); // mark this block as redundancy
+            }
+        }
+
+        // mark all remaining as 1 ref, available to be modified
+        for (uint64_t i = 0; i < map_size; i++)
+        {
+            if (this_root_bitmap.get_bit(i))
+            {
+                inode_construct_info_.block_attribute->set<index_node_referencing_number>(i, 1);
+                inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_AVAILABLE_TO_MODIFY_0x00);
             }
         }
     }

@@ -1095,17 +1095,21 @@ namespace cfs
             const auto target_parent_stat = target_parent->get_stat();;
             target_parent.reset();
 
-            auto dentry = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get()); // parent
-            dentry.set_mtime(utils::get_timespec());
-            dentry.set_atime(utils::get_timespec());
-            dentry.set_ctime(utils::get_timespec());
+            if ((target_parent_stat.st_mode & S_IFMT) == S_IFDIR)
+            {
+                auto dentry = make_child_inode<dentry_t>(target_parent_stat.st_ino, target_parent_parents.back().get()); // parent
+                dentry.set_mtime(utils::get_timespec());
+                dentry.set_atime(utils::get_timespec());
+                dentry.set_ctime(utils::get_timespec());
 
-            auto inode = dentry.make_inode<inode_t>(target_);
-            inode.chmod(S_IFLNK | 0755);
-            inode.write(path.c_str(), path.size(), 0);
-            inode.set_mtime(utils::get_timespec());
-            inode.set_atime(utils::get_timespec());
-            inode.set_ctime(utils::get_timespec());
+                auto inode = dentry.make_inode<inode_t>(target_);
+                inode.chmod(S_IFLNK | 0755);
+                inode.write(path.c_str(), path.size(), 0);
+                inode.set_mtime(utils::get_timespec());
+                inode.set_atime(utils::get_timespec());
+                inode.set_ctime(utils::get_timespec());
+                return 0;
+            }
 
             return -ENOTDIR;
         }
