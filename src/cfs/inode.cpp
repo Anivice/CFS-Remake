@@ -197,7 +197,7 @@ void cfs::inode_t::root_cow()
     // [DENTRY ENTRY POINTER] -> 8 bytes, 64bit pointer
     // [BITMAP]             -> Compressed
     // [INODE]              -> Compressed
-    // [STATIC DATA]        -> Uncompressed, place holder
+    // [STATIC DATA]        -> Uncompressed, placeholder
     // [DENTRY ENTRY]
 
     const auto bitmap_dump = referenced_inode_->block_manager_->dump_bitmap_data();
@@ -559,8 +559,6 @@ void cfs::dentry_t::snapshot(const std::string &name)
     dentry_map_reversed_search_map_.emplace(new_inode_index, name);
     save_dentry_unblocked();
 
-    // TODO: Dump attribute map, that way we can compare two attribute maps and see just which block is deallocated
-    // TODO: in which generation. that will help clean up process
     // dump bitmap
     const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
     auto bitmap_dump = inode_construct_info_.block_manager->dump_bitmap_data();
@@ -586,7 +584,6 @@ void cfs::dentry_t::snapshot(const std::string &name)
         }
     }
 
-    /// now, we need to replace target dump with our current bitmap dump
     auto replace_write = [this, &level3s](const std::vector<uint8_t> & data, const uint64_t offset)
     {
         const uint64_t bytes = data.size();
@@ -617,6 +614,13 @@ void cfs::dentry_t::snapshot(const std::string &name)
         }
     };
 
+    /// [dentry_start_]
+    /// [Compressed Metadata]
+    /// [Attribute Map, size=(data_block_attribute_table_end - data_block_attribute_table_start) * block_size]
+    /// [Bitmap, size=(data_bitmap_end - data_bitmap_start) * block_size]
+    /// -> dentry_start_
+    /// [Dentry, compressed]
+
     // write bitmap data
     const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
     replace_write(bitmap_dump, old_dentry_start_ - map_bytes);
@@ -627,7 +631,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
     const auto attribute_dump = inode_construct_info_.block_attribute->dump();
     replace_write(attribute_dump, old_dentry_start_ - map_bytes - bytes_by_attribute_map);
 
-    // then we mark again to mask any missing ones, and increate link count this time
+    // then we mark again to mask any missing ones during CoW
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
         const auto attr = inode_construct_info_.block_attribute->get(i);
@@ -638,7 +642,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
             }
 
             if (attr.block_type != COW_REDUNDANCY_BLOCK) {
-                inode_construct_info_.block_attribute->inc<index_node_referencing_number>(i);
+                inode_construct_info_.block_attribute->set<index_node_referencing_number>(i, 2); // reset to 2
             }
         }
     }
@@ -708,8 +712,23 @@ void cfs::dentry_t::revert(const std::string &name)
 
     save_dentry_unblocked(); // save on disk
 
-    uint64_t non_cow_blocks = 0;
+    // reset reference state
+    for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
+    {
+        const auto attr = inode_construct_info_.block_attribute->get(i);
+        if (inode_construct_info_.block_manager->blk_at(i))
+        {
+            if (attr.block_status == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
+                inode_construct_info_.block_attribute->set<block_status>(i, BLOCK_FROZEN_AND_IS_SNAPSHOT_REGULAR_BLOCK_0x02);
+            }
 
+            if (attr.block_type != COW_REDUNDANCY_BLOCK) {
+                inode_construct_info_.block_attribute->set<index_node_referencing_number>(i, 2);
+            }
+        }
+    }
+
+    uint64_t non_cow_blocks = 0;
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)
     {
         const auto attr = inode_construct_info_.block_attribute->get(i);
@@ -735,76 +754,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     uint64_t target_index = ptr->second;
     const uint64_t old_index_reference = target_index;
 
-    cfs_inode_service_t::linearized_block_t occupied_blocks;
-    tsl::hopscotch_map<uint64_t, std::vector<uint8_t>> bitmaps_from_all_snapshots;
-    const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
-
-    auto read_bitmap_from_snapshot_entry_point = [&](const uint64_t snapshot_entry_index)
-    {
-        auto dentry = dentry_t(snapshot_entry_index,
-            inode_construct_info_.parent_fs_governor,
-            inode_construct_info_.block_manager,
-            inode_construct_info_.journal,
-            inode_construct_info_.block_attribute,
-            this); // construct target child
-        const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
-        const uint64_t map_start = dentry.dentry_start_ - map_bytes;
-        std::vector<uint8_t> per_snapshot_fs_info(map_bytes);
-        dentry.read(reinterpret_cast<char *>(per_snapshot_fs_info.data()), map_bytes, map_start);
-        bitmaps_from_all_snapshots.emplace(snapshot_entry_index, per_snapshot_fs_info);
-    };
-
-    for (const auto & pointer: dentry_map_ | std::views::values)
-    {
-        if (inode_construct_info_.block_attribute->get<block_status>(pointer)
-            == BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01)
-        {
-            read_bitmap_from_snapshot_entry_point(pointer);
-        }
-    }
-
-    tsl::hopscotch_map<uint64_t /* block number */, uint64_t /* overlapping count */> bitmap_overview_map;
-    auto record_bitmap = [&](std::vector<uint8_t> bitmap_data, const uint64_t bitmap_particles)
-    {
-        class per_snapshot_bitmap_t : public bitmap_base {
-        public:
-            explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
-            {
-                init_data_array = [&](const uint64_t)->bool
-                {
-                    data_array_ = data;
-                    return true;
-                };
-
-                init(size);
-            }
-        } per_snapshot_bitmap(bitmap_data.data(), // bitmap start
-            bitmap_particles); // particles. bytes are calculated automatically
-
-        for (uint64_t i = 0; i < bitmap_particles; i++)
-        {
-            if (per_snapshot_bitmap.get_bit(i)) {
-                bitmap_overview_map[i]++;
-            }
-        }
-    };
-
-    std::ranges::for_each(bitmaps_from_all_snapshots | std::views::values, [&](const std::vector<uint8_t> & bitmap_data) {
-        record_bitmap(bitmap_data, map_size);
-    });
-
-    {
-        auto dentry = dentry_t(target_index,
-            inode_construct_info_.parent_fs_governor,
-            inode_construct_info_.block_manager,
-            inode_construct_info_.journal,
-            inode_construct_info_.block_attribute,
-            this); // construct target child
-        occupied_blocks = dentry.referenced_inode_->linearize_all_blocks();
-        target_index = dentry.current_referenced_inode_; // update reference
-    }
-
-    auto delete_block = [this](const std::vector<uint64_t> & blk)
+    auto delete_blocks = [this](const std::vector<uint64_t> & blk)
     {
         std::ranges::for_each(blk, [this](const uint64_t p) {
             inode_construct_info_.block_attribute->move<block_type, block_type_cow>(p); // backup block type
@@ -812,11 +762,336 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         });
     };
 
-    // remove all occupied blocks
-    delete_block(occupied_blocks.level1_pointers);
-    delete_block(occupied_blocks.level2_pointers);
-    delete_block(occupied_blocks.level3_pointers);
-    delete_block({ target_index });
+    ////////////////////////
+    /// SORT GENERATIONS ///
+    ////////////////////////
+    /// first, we need to sort generations by creation time
+    std::vector < std::pair < uint64_t /* snapshot creation time */, uint64_t /* snapshot entry index */ > > generation_reference_table;
+    for (const auto & pointer: dentry_map_ | std::views::values)
+    {
+        if (inode_construct_info_.block_attribute->get<block_status>(pointer)
+            == BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01)
+        {
+            /// create a static index node
+            inode_t inode(pointer,
+                inode_construct_info_.parent_fs_governor,
+                inode_construct_info_.block_manager,
+                inode_construct_info_.journal,
+                inode_construct_info_.block_attribute,
+                this);
+            generation_reference_table.emplace_back(inode.get_stat().st_mtim.tv_sec, pointer); // <creation second: pointer>
+        }
+    }
+    // put this root into the list as the latest generation
+    generation_reference_table.emplace_back(utils::get_timespec().tv_sec, current_referenced_inode_);
+    // then we sort the list
+    std::ranges::sort(generation_reference_table,
+        [](const std::pair < uint64_t /* snapshot creation time */, uint64_t /* snapshot entry index */ > & a,
+            const std::pair < uint64_t , uint64_t  > & b){ return a.first < b.first; });
+
+    /////////////////////////////////////
+    /// FIND OUT GENERAL PROGRESSIONS ///
+    /////////////////////////////////////
+    /// now, compare map to map, find out generational progression
+    struct generation_t {
+        std::vector<uint8_t> bitmap;
+        std::vector<uint8_t> attributes;
+    };
+
+    struct result_t {
+        std::vector<uint64_t> these_blocks_allocated_during_this_gen;
+        std::vector<uint64_t> these_blocks_removed_during_this_gen;
+
+        // used by others
+        uint64_t before = 0;
+        uint64_t after = 0;
+    };
+
+    class per_snapshot_bitmap_t : public bitmap_base {
+    public:
+        explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
+        {
+            init_data_array = [&](const uint64_t)->bool
+            {
+                data_array_ = data;
+                return true;
+            };
+
+            init(size);
+        }
+    };
+
+    auto compare_generations = [](generation_t & before, generation_t & after,  const uint64_t particles)->result_t
+    {
+        per_snapshot_bitmap_t bitmap_before(before.bitmap.data(), particles);
+        per_snapshot_bitmap_t bitmap_after(after.bitmap.data(), particles);
+        result_t result;
+
+        auto get_attribute_by_index = [](const uint64_t index, const std::vector<uint8_t> & attributes)->cfs_block_attribute_t {
+            cfs_block_attribute_t ret{};
+            std::memcpy(&ret, attributes.data() + index * sizeof(ret), sizeof(ret));
+            return ret;
+        };
+
+        for (uint64_t i = 0; i < particles; ++i)
+        {
+            if (!bitmap_before.get_bit(i) && bitmap_after.get_bit(i)) { // referenced in later map but never in before
+                result.these_blocks_allocated_during_this_gen.emplace_back(i);
+                continue; // determined
+            }
+
+            if (bitmap_before.get_bit(i) && get_attribute_by_index(i, before.attributes).index_node_referencing_number < 2)
+                // referenced in the previous map, but delinked by later
+            {
+                result.these_blocks_removed_during_this_gen.emplace_back(i);
+            }
+
+            // anything else is carried over
+        }
+
+        return result;
+    };
+
+    // load data
+    tsl::hopscotch_map<uint64_t, std::vector<uint8_t>> bitmaps_from_all_snapshots;
+    tsl::hopscotch_map<uint64_t, std::vector<uint8_t>> attributes_from_all_snapshots;
+    const auto map_size = static_info_->data_table_end - static_info_->data_table_start;
+    auto read_bitmap_and_attributes_from_snapshot_entry_point = [&](const uint64_t snapshot_entry_index, dentry_t * dentry = nullptr)
+    {
+        std::unique_ptr < dentry_t > dentry_unique_ptr(dentry);
+        if (dentry == nullptr)
+        {
+            dentry_unique_ptr = std::make_unique<dentry_t>(snapshot_entry_index,
+                inode_construct_info_.parent_fs_governor,
+                inode_construct_info_.block_manager,
+                inode_construct_info_.journal,
+                inode_construct_info_.block_attribute,
+                this); // construct target child
+        }
+
+        const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
+        const uint64_t map_start = dentry_unique_ptr->dentry_start_ - map_bytes;
+        const uint64_t attr_bytes = (static_info_->data_block_attribute_table_end - static_info_->data_block_attribute_table_start) * static_info_->block_size;
+        const uint64_t attr_start = dentry_unique_ptr->dentry_start_ - attr_bytes - map_bytes;
+
+        std::vector<uint8_t> bitmap_data(map_bytes);
+        dentry_unique_ptr->read(reinterpret_cast<char *>(bitmap_data.data()), map_bytes, map_start);
+        bitmaps_from_all_snapshots.emplace(snapshot_entry_index, bitmap_data);
+
+        std::vector<uint8_t> attributes_data(attr_bytes);
+        dentry_unique_ptr->read(reinterpret_cast<char *>(attributes_data.data()), attr_bytes, attr_start);
+        attributes_from_all_snapshots.emplace(snapshot_entry_index, attributes_data);
+    };
+
+    // from generation_reference_table, read all generations
+    for (const auto & pointer: generation_reference_table | std::views::values) {
+        if (pointer == current_referenced_inode_) // pointer is literally fucking me right now
+        {
+            read_bitmap_and_attributes_from_snapshot_entry_point(pointer, this); // I can't lock onto me so
+        }
+        else { // previous me's
+            read_bitmap_and_attributes_from_snapshot_entry_point(pointer);
+        }
+    }
+
+    // bitwise comparison
+    tsl::hopscotch_map < uint64_t /* any of the before or after */, std::vector < result_t * > > bitwise_comparison_results;
+    std::vector < result_t > results;
+    {
+        const uint64_t offset_end = generation_reference_table.size() - 2;
+        // say we have 3 generations {0, 1, 2}, compare [0,1], [1,2], offset end = 3 - 2
+        // for loop: for (i = 0) ==> 1 { compare(i, i+1); }
+        for (uint64_t i = 0; i <= offset_end; ++i)
+        {
+            const auto particles = static_info_->data_table_end - static_info_->data_table_start;
+            const uint64_t before_index = generation_reference_table[i].second; // first is time, second is index
+            const uint64_t after_index = generation_reference_table[i + 1].second;
+            generation_t generation_before {
+                .bitmap = bitmaps_from_all_snapshots.at(before_index),
+                .attributes = attributes_from_all_snapshots.at(before_index),
+            };
+
+            generation_t generation_after{
+                .bitmap = bitmaps_from_all_snapshots.at(after_index),
+                .attributes = attributes_from_all_snapshots.at(after_index),
+            };
+
+            auto result = compare_generations(generation_before, generation_after, particles);
+            result.before = before_index;
+            result.after = after_index;
+
+            results.emplace_back(result);
+            bitwise_comparison_results[before_index].emplace_back(&results.back());
+            bitwise_comparison_results[after_index].emplace_back(&results.back());
+        }
+    }
+
+    //////////////////////////////////////////////////////
+    /// FIGURE OUT HOW TO DELETE GENERATION COHESIVELY ///
+    //////////////////////////////////////////////////////
+    // there are couple rules here:
+    // for generation cohesive, you can only delete blocks that has the following attributes:
+    //  * never referenced by previous generations, that is, allocated by this generation
+    //  * never referenced by later generations, that is, deleted after this generation
+    const auto comparison_results = bitwise_comparison_results.at(target_index);
+    result_t * before_progression = nullptr, * after_progression = nullptr;
+    for (const auto & result : comparison_results)
+    {
+        if (result->after == target_index) {
+            before_progression = result;
+        } else if (result->before == target_index) {
+            after_progression = result;
+        }
+    }
+
+    cfs_assert_simple(after_progression != nullptr);
+
+    auto remove_snapshot_entry_occupied_blocks = [&]
+    {
+        // remove blocks occupied by snapshot entry point
+        cfs_inode_service_t::linearized_block_t occupied_blocks;
+        {
+            auto dentry = dentry_t(target_index,
+                inode_construct_info_.parent_fs_governor,
+                inode_construct_info_.block_manager,
+                inode_construct_info_.journal,
+                inode_construct_info_.block_attribute,
+                this); // construct target child
+            occupied_blocks = dentry.referenced_inode_->linearize_all_blocks();
+            target_index = dentry.current_referenced_inode_; // update reference
+        }
+
+        // remove all occupied blocks by snapshot entry point
+        delete_blocks(occupied_blocks.level1_pointers);
+        delete_blocks(occupied_blocks.level2_pointers);
+        delete_blocks(occupied_blocks.level3_pointers);
+        delete_blocks({ target_index });
+    };
+
+    // after cannot be nullptr, but before can, if it is the first generation
+    // if before is nullptr, then all the blocks are referenced by later generation until
+    // later ones are removed, unless after is active root.
+    if (before_progression != nullptr)
+    {
+        tsl::hopscotch_map < uint64_t, bool > allocated_in_this_snapshot;
+        std::vector<uint64_t> allocated_and_removed;
+        std::ranges::for_each(before_progression->these_blocks_allocated_during_this_gen, [&](const uint64_t index) {
+            allocated_in_this_snapshot.emplace(index, true);
+        });
+
+        std::ranges::for_each(after_progression->these_blocks_removed_during_this_gen, [&](const uint64_t index)
+        {
+            if (allocated_in_this_snapshot.contains(index)) {
+                allocated_and_removed.emplace_back(index);
+            }
+        });
+
+        delete_blocks(allocated_and_removed);
+        remove_snapshot_entry_occupied_blocks();
+    }
+    else if (after_progression->after == current_referenced_inode_ && generation_reference_table.size() == 2)
+        // first generation, and later one is literally root
+        // easy way is to compare and dedup manually
+    {
+        delete_blocks(after_progression->these_blocks_removed_during_this_gen);
+        // calculate overlaps
+        std::vector<uint8_t> actual_blocks_used_by_real_root((static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size, 0);
+        per_snapshot_bitmap_t this_root_bitmap(actual_blocks_used_by_real_root.data(), map_size);
+        auto venture_non_dentry = [&](const uint64_t index)
+        {
+            cfs_inode_service_t inode(index, inode_construct_info_.parent_fs_governor,
+                inode_construct_info_.block_manager,
+                inode_construct_info_.journal,
+                inode_construct_info_.block_attribute); // OK DO NOT MODIFY THIS DENTRY!!!
+            const auto [lv1, lv2, lv3] = inode.linearize_all_blocks();
+            auto mark = [&](const std::vector<uint64_t> & p) {
+                std::ranges::for_each(p, [&](const uint64_t b){ this_root_bitmap.set_bit(b, true); });
+            };
+
+            mark(lv1);
+            mark(lv2);
+            mark(lv3);
+            mark({ inode.get_stat().st_ino });
+        };
+
+        auto venture_dentry = [&](const uint64_t index)
+        {
+            dentry_t inode(index, inode_construct_info_.parent_fs_governor,
+                inode_construct_info_.block_manager,
+                inode_construct_info_.journal,
+                inode_construct_info_.block_attribute, nullptr); // OK DO NOT MODIFY THIS DENTRY!!!
+            const auto [lv1, lv2, lv3] = inode.referenced_inode_->linearize_all_blocks();
+            auto mark = [&](const std::vector<uint64_t> & p) {
+                std::ranges::for_each(p, [&](const uint64_t b){ this_root_bitmap.set_bit(b, true); });
+            };
+
+            mark(lv1);
+            mark(lv2);
+            mark(lv3);
+            mark({ inode.get_stat().st_ino });
+            return inode.ls() | std::views::values;
+        };
+
+        std::function<void(uint64_t)> venture_from_one_entry;
+        venture_from_one_entry = [&](const uint64_t index)
+        {
+            mode_t mode = 0;
+            {
+                cfs_inode_service_t inode(index, inode_construct_info_.parent_fs_governor,
+                    inode_construct_info_.block_manager,
+                    inode_construct_info_.journal,
+                    inode_construct_info_.block_attribute);
+                mode = inode.get_stat().st_mode;
+            }
+
+            if ((mode & S_IFMT) == S_IFDIR) {
+                auto list = venture_dentry(index);
+                std::ranges::for_each(list, [&](const uint64_t b){ venture_from_one_entry(b); });
+            } else {
+                venture_non_dentry(index);
+            }
+
+            this_root_bitmap.set_bit(index, true);
+        };
+
+        // mark all children except entry point
+        for (const auto & pointer : dentry_map_ | std::views::values)
+        {
+            if (inode_construct_info_.block_attribute->get<block_status>(pointer)
+                != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01)
+            {
+                venture_from_one_entry(pointer);
+            }
+        }
+
+
+        // mark root node
+        const auto [lv1, lv2, lv3] = referenced_inode_->linearize_all_blocks();
+        auto mark = [&](const std::vector<uint64_t> & p) {
+            std::ranges::for_each(p, [&](const uint64_t b){ this_root_bitmap.set_bit(b, true); });
+        };
+
+        mark(lv1);
+        mark(lv2);
+        mark(lv3);
+        mark({ current_referenced_inode_ });
+
+        // now, this_root_bitmap contains data that only referenced by root, remove all other data
+        for (uint64_t i = 0; i < map_size; i++)
+        {
+            if (inode_construct_info_.block_manager->blk_at(i)
+                && inode_construct_info_.block_attribute->get<block_type>(i) != COW_REDUNDANCY_BLOCK
+                && !this_root_bitmap.get_bit(i))
+            {
+                // allocated, non-redundancy, BUT!, not present in root tree in any way or form
+                delete_blocks({i}); // mark this block as redundancy
+            }
+        }
+    }
+    else // first gen, later is not root, all nodes are referenced unfortunately until in the last gen we do a proper clean up
+    {
+        remove_snapshot_entry_occupied_blocks();
+    }
 
     // remove corresponding link as well
     dentry_map_.erase(name);
@@ -824,100 +1099,6 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
     save_dentry_unblocked();
 
     // static field. no CoW after this
-
-    // record active bitmap data
-    {
-        std::vector<uint8_t> active_bitmap_suite = inode_construct_info_.block_manager->dump_bitmap_data();
-        class per_snapshot_bitmap_t : public bitmap_base {
-        public:
-            explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
-            {
-                init_data_array = [&](const uint64_t)->bool
-                {
-                    data_array_ = data;
-                    return true;
-                };
-
-                init(size);
-            }
-        } per_snapshot_bitmap(active_bitmap_suite.data(), // bitmap start
-            map_size); // particles. bytes are calculated automatically
-
-        for (uint64_t i = 0; i < map_size; i++)
-        {
-            if (per_snapshot_bitmap.get_bit(i)
-                && inode_construct_info_.block_attribute->get<block_type>(i) == COW_REDUNDANCY_BLOCK) // remove redundancies
-            {
-                per_snapshot_bitmap.set_bit(i, false);
-            }
-        }
-
-        record_bitmap(active_bitmap_suite, map_size);
-    }
-
-    // dry run, remove blocks referenced by snapshot and no others
-    {
-        class per_snapshot_bitmap_t : public bitmap_base {
-        public:
-            explicit per_snapshot_bitmap_t(uint8_t * data, const uint64_t size)
-            {
-                init_data_array = [&](const uint64_t)->bool
-                {
-                    data_array_ = data;
-                    return true;
-                };
-
-                init(size);
-            }
-        } per_snapshot_bitmap(bitmaps_from_all_snapshots.at(old_index_reference).data(), // bitmap start
-            map_size); // particles. bytes are calculated automatically
-
-        if (bitmaps_from_all_snapshots.size() > 1)
-        {
-            for (uint64_t i = 0; i < map_size; i++)
-            {
-                // present in this bitmap
-                if (per_snapshot_bitmap.get_bit(i)) {
-                    bitmap_overview_map[i]--;
-                }
-            }
-        }
-        else if (bitmaps_from_all_snapshots.size() == 1) // if only one snapshot is left, this means...
-        {
-            for (uint64_t i = 0; i < map_size; i++)
-            {
-                // present in this bitmap
-                if (per_snapshot_bitmap.get_bit(i)) {
-                    bitmap_overview_map[i]--;
-                }
-            }
-        }
-    }
-
-    for (uint64_t i = 0; i < map_size; i++) {
-        if (inode_construct_info_.block_manager->blk_at(i)) {
-            inode_construct_info_.block_attribute->set<index_node_referencing_number>(i, 0); // place holder
-        }
-    }
-
-    // now, bitmap_overview_map is the processed map
-    for (const auto & [index, references] : bitmap_overview_map) {
-        inode_construct_info_.block_attribute->set<index_node_referencing_number>(index, references); // set the corresponding reference
-    }
-
-    // see which ones are not yet set to redundancy
-    for (uint64_t i = 0; i < map_size; i++)
-    {
-        if (inode_construct_info_.block_manager->blk_at(i))
-        {
-            const auto attr = inode_construct_info_.block_attribute->get(i);
-            if (attr.index_node_referencing_number == 0 && attr.block_type != COW_REDUNDANCY_BLOCK) {
-                inode_construct_info_.block_attribute->move<block_type, block_type_cow>(i);
-                inode_construct_info_.block_attribute->set<block_type>(i, COW_REDUNDANCY_BLOCK); // CoW this block
-            }
-        }
-    }
-
     // update corresponding flags
     uint64_t non_cow_blocks = 0;
     for (uint64_t i = 0; i < map_size; i++)
