@@ -1,4 +1,5 @@
 #include "inode.h"
+#include "lz4frame.h"
 
 void cfs::inode_t::save_dentry_unblocked()
 {
@@ -195,9 +196,8 @@ void cfs::inode_t::root_cow()
 
     // [DENTRY ENTRY POINTER] -> 8 bytes, 64bit pointer
     // [BITMAP]             -> Compressed
-    // [ATTRIBUTES]         -> Compressed
     // [INODE]              -> Compressed
-    // [STATIC DATA]        -> Always the block size as bitmap, uncompressed
+    // [STATIC DATA]        -> Uncompressed, place holder
     // [DENTRY ENTRY]
 
     const auto bitmap_dump = referenced_inode_->block_manager_->dump_bitmap_data();
@@ -205,7 +205,6 @@ void cfs::inode_t::root_cow()
     std::vector<uint8_t> inode_metadata(referenced_inode_->block_size_);
     std::memcpy(inode_metadata.data(), referenced_inode_->inode_effective_lock_.data(),
                 referenced_inode_->inode_effective_lock_.size());
-    /// no static data, yet
 
     data_.resize(bitmap_dump.size() /* + attribute_dump.size() */ + inode_metadata.size()); // we keep this buffer
     /// so that less malloc is called
@@ -220,19 +219,19 @@ void cfs::inode_t::root_cow()
     write_to_buffer(bitmap_dump);
     // write_to_buffer(attribute_dump);
     write_to_buffer(inode_metadata);
-    const std::vector<uint8_t> empty((static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size, 0);
+    const auto empty_size =
+        (static_info_->data_block_attribute_table_end - static_info_->data_block_attribute_table_start) * static_info_->block_size + /* attribute map */
+        (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size /* bitmap */;
 
     const auto data_compressed = utils::arithmetic::compress(data_);
-    dentry_start_ = data_compressed.size() + sizeof(dentry_start_) + empty.size(); // so save_dentry_unblocked() knows where to continue
+    dentry_start_ = data_compressed.size() + sizeof(dentry_start_) + empty_size; // so save_dentry_unblocked() knows where to continue
 
     offset = 0;
 
-    referenced_inode_->resize(0);
+    referenced_inode_->resize(dentry_start_);
     offset += referenced_inode_->write(reinterpret_cast<char *>(&dentry_start_), sizeof(uint64_t), offset);
     offset += referenced_inode_->write(reinterpret_cast<const char *>(data_compressed.data()), data_compressed.size(), offset);
-    offset += referenced_inode_->write(reinterpret_cast<const char *>(empty.data()), empty.size(), offset);
     /// Now, we have written all the metadata:
-
     save_dentry_unblocked();
 
     // relink root
@@ -588,33 +587,45 @@ void cfs::dentry_t::snapshot(const std::string &name)
     }
 
     /// now, we need to replace target dump with our current bitmap dump
-    const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
-    const uint64_t map_start = old_dentry_start_ - map_bytes;
-    const uint64_t map_start_block = map_start / static_info_->block_size;
-    const uint64_t map_first_block_skip = map_start % static_info_->block_size;
-    const uint64_t map_first_block_write = map_bytes > (static_info_->block_size - map_first_block_skip)
-        ? (static_info_->block_size - map_first_block_skip)
-        : (map_bytes - map_first_block_skip);
-    const uint64_t map_rest_of_the_bytes = map_bytes - map_first_block_write;
-    const uint64_t map_rest_continuous = map_rest_of_the_bytes / static_info_->block_size;
-    const uint64_t map_last_block_write = map_rest_of_the_bytes % static_info_->block_size;
-    bitmap_dump.resize(map_bytes);
+    auto replace_write = [this, &level3s](const std::vector<uint8_t> & data, const uint64_t offset)
+    {
+        const uint64_t bytes = data.size();
+        const uint64_t start = offset;
+        const uint64_t start_block = start / static_info_->block_size;
+        const uint64_t first_block_skip = start % static_info_->block_size;
+        const uint64_t first_block_write = bytes > (static_info_->block_size - first_block_skip)
+            ? (static_info_->block_size - first_block_skip)
+            : (bytes - first_block_skip);
+        const uint64_t rest_of_the_bytes = bytes - first_block_write;
+        const uint64_t rest_continuous = rest_of_the_bytes / static_info_->block_size;
+        const uint64_t last_block_write = rest_of_the_bytes % static_info_->block_size;
 
-    uint64_t offset = 0;
-    auto replace_write = [&](const uint64_t block, const uint64_t size, const uint64_t w_off) {
-        const auto blk_lock = inode_construct_info_.parent_fs_governor->lock(level3s[block] + static_info_->data_table_start);
-        std::memcpy(blk_lock.data() + w_off, bitmap_dump.data() + offset, size);
-        offset += size;
+        uint64_t src_offset = 0;
+        auto replace_write_sig = [&](const uint64_t block, const uint64_t size, const uint64_t w_off) {
+            const auto blk_lock = inode_construct_info_.parent_fs_governor->lock(level3s[block] + static_info_->data_table_start);
+            std::memcpy(blk_lock.data() + w_off, data.data() + src_offset, size);
+            src_offset += size;
+        };
+
+        // without CoW, in place replace
+        replace_write_sig(start_block, first_block_write, first_block_skip);
+        for (uint64_t i = 1; i <= rest_continuous; i++) {
+            replace_write_sig(start_block + i, static_info_->block_size, 0);
+        }
+        if (last_block_write != 0) {
+            replace_write_sig(start_block + rest_continuous + 1, last_block_write, 0);
+        }
     };
 
-    // without CoW, in place replace
-    replace_write(map_start_block, map_first_block_write, map_first_block_skip);
-    for (uint64_t i = 1; i <= map_rest_continuous; i++) {
-        replace_write(map_start_block + i, static_info_->block_size, 0);
-    }
-    if (map_last_block_write != 0) {
-        replace_write(map_start_block + map_rest_continuous + 1, map_last_block_write, 0);
-    }
+    // write bitmap data
+    const uint64_t map_bytes = (static_info_->data_bitmap_end - static_info_->data_bitmap_start) * static_info_->block_size;
+    replace_write(bitmap_dump, old_dentry_start_ - map_bytes);
+
+    // write attribute map data
+    const auto bytes_by_attribute_map =
+        (static_info_->data_block_attribute_table_end - static_info_->data_block_attribute_table_start) * static_info_->block_size;
+    const auto attribute_dump = inode_construct_info_.block_attribute->dump();
+    replace_write(attribute_dump, old_dentry_start_ - map_bytes - bytes_by_attribute_map);
 
     // then we mark again to mask any missing ones, and increate link count this time
     for (uint64_t i = 0; i < static_info_->data_table_end - static_info_->data_table_start; i++)

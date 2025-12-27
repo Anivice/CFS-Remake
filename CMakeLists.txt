@@ -117,6 +117,8 @@ endfunction()
 generate_from_resource_file(version.txt version.cpp version.h version_text)
 generate_from_resource_file(cfs.command.readline cfs_command.cpp cfs_command.h cfs_command_source)
 
+add_subdirectory(src/lz4-1.10.0/build/cmake)
+include_directories(src/lz4-1.10.0/lib)
 add_library(cfs_obj STATIC                      src/include/cfs.h
         src/backtracer/generalCFSbaseError.cpp  src/include/generalCFSbaseError.h
         src/misc/color.cpp                      src/include/colors.h
@@ -132,9 +134,8 @@ add_library(cfs_obj STATIC                      src/include/cfs.h
         ${CMAKE_BINARY_DIR}/version.cpp         ${CMAKE_BINARY_DIR}/version.h
         ${CMAKE_BINARY_DIR}/cfs_command.cpp     ${CMAKE_BINARY_DIR}/cfs_command.h
         src/cfs/inode.cpp                       src/include/inode.h
-        src/misc/lz4.c                          src/include/lz4.h
 )
-target_link_libraries(cfs_obj PUBLIC atomic)
+target_link_libraries(cfs_obj PUBLIC atomic lz4_static)
 
 add_executable(cfs
         src/main.cpp

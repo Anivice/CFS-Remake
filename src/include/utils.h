@@ -64,11 +64,11 @@ namespace cfs::utils
         /// @return CRC64 checksum of the provided data
         template < PODType Type >
         [[nodiscard]] uint64_t hash64(const Type & data) noexcept {
-            return hash64((uint8_t*)&data, sizeof(data));
+            return hash64(reinterpret_cast<const uint8_t *>(&data), sizeof(data));
         }
 
-        std::vector < uint8_t > compress(const std::vector < uint8_t > & data) noexcept;
-        std::vector < uint8_t > decompress(const std::vector < uint8_t > & data) noexcept;
+        std::vector < uint8_t > compress(const std::vector < uint8_t > & data);
+        std::vector < uint8_t > decompress(const std::vector < uint8_t > & data);
     }
 
     /// Return current UNIX timestamp
