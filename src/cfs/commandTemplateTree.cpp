@@ -1,3 +1,4 @@
+#ifdef CFS_COMMAND_UTILITY
 #include "commandTemplateTree.h"
 #include "logger.h"
 #include "cfs_command.h"
@@ -386,3 +387,4 @@ namespace cmdTpTree
         return matches;
     }
 } // cmdTpTree
+#endif

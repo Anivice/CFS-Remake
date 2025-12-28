@@ -215,31 +215,6 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
     head.runtime_info.allocated_non_cow_blocks = 1; // root
 
     cat_header(head);
-    //
-    // auto region_gen = [](const uint64_t start, const uint64_t end) {
-    //     return "[" + std::to_string(start) + ", " + std::to_string(end) + ")";
-    // };
-    //
-    // auto blk_gen = [](const uint64_t start, const uint64_t end) {
-    //     return std::to_string(end - start) + " block" + (end - start > 1 ? "s" : "");
-    // };
-    //
-    // std::vector < std::vector < std::string > > lines;
-    // std::vector<std::pair < std::string, int > > title = { { "Entry", 3 }, { "Region", 2 }, { "Block count", 2 } };
-    // auto printLine = [&](const std::string & name, const std::string & line, const std::string & line2) {
-    //     lines.emplace_back(std::vector {name, line, line2});
-    // };
-    //
-    // printLine("Block size", std::to_string(head.static_info.block_size), "/");
-    // printLine("Addressable region", gen_info(0, head.static_info.blocks));
-    // printLine("FILE SYSTEM HEAD", gen_info(0, 1));
-    // printLine("DATA REGION BITMAP", gen_info(head.static_info.data_bitmap_start, head.static_info.data_bitmap_end));
-    // printLine("DATA BITMAP BACKUP", gen_info(head.static_info.data_bitmap_backup_start, head.static_info.data_bitmap_backup_end));
-    // printLine("DATA BLOCK ATTRIBUTE", gen_info(head.static_info.data_block_attribute_table_start, head.static_info.data_block_attribute_table_end));
-    // printLine("DATA BLOCK", gen_info(head.static_info.data_table_start, head.static_info.data_table_end));
-    // printLine("JOURNAL REGION", gen_info(head.static_info.journal_start, head.static_info.journal_end));
-    // printLine("FILE SYSTEM HEAD BACKUP", gen_info(head.static_info.blocks - 1, head.static_info.blocks));
-    // utils::print_table(title, lines, "Disk Overview");
     return head;
 }
 
@@ -247,56 +222,43 @@ cfs::cfs_head_t make_head(const uint64_t file_size, const uint64_t block_size, c
 
 void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_size, const std::string & label)
 {
-    ilog("Discarding blocks...\n");
     namespace fs = std::filesystem;
-    int fd = 0;
-    const uint64_t size_bytes = fs::file_size(path_to_block_file);
-    assert_throw((fd = open(path_to_block_file.c_str(), O_RDWR)) > 0, "invalid file descriptor");
-    if ((fallocate(fd, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE, 0, static_cast<off_t>(size_bytes)) != 0)
-        || (fallocate(fd, FALLOC_FL_ZERO_RANGE, 0, static_cast<off_t>(size_bytes)) != 0))
-    {
-        close(fd);
-        basic_io::mmap file(path_to_block_file);
-        std::memset(file.data(), 0, file.size());
-    }
-    else {
-        close(fd);
-    }
+    basic_io::mmap file(path_to_block_file);
+    assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
+    ilog("Creating a Cow File System, path=", path_to_block_file, ", size=", file.size(), "\n");
 
+    ilog("Calculating CFS info...\n");
+    cfs_head_t head = make_head(file.size(), block_size, label);
+    ilog("Calculating CFS info done.\n");
+
+    ilog("Discarding blocks...\n");
+    ilog("Using mmap + memset, size=",
+        cfs::utils::value_to_size(head.static_info.block_size * head.static_info.data_bitmap_backup_end
+        + head.static_info.block_size * 2), "\n");
+
+    auto zero_out = [&](const uint64_t start, const uint64_t end) {
+        std::memset(file.data() + start * head.static_info.block_size, 0, (end - start) * head.static_info.block_size);
+    };
+    zero_out(0, head.static_info.data_bitmap_backup_end);
+    zero_out(head.static_info.journal_start, head.static_info.journal_start + 1);
+    zero_out(head.static_info.journal_end - 1, head.static_info.journal_end);
     ilog("Discarding finished\n");
-    std::vector<uint8_t> empty_blk;
-    cfs_head_t head{};
-    {
-        basic_io::mmap file(path_to_block_file);
-        assert_throw(file.size() >= cfs_minimum_size, "Disk too small");
-        ilog("Calculating CFS info...\n");
-        head = make_head(file.size(), block_size, label);
-        ilog("Calculating CFS info done.\n");
-        ilog("Writing header to file...");
-        std::memcpy(file.data(), &head, sizeof(head)); // head
-        std::memcpy(file.data() + file.size() - sizeof(head), &head, sizeof(head)); // tail
-        ilog("done.\n");
-        file.close();
-        empty_blk.resize(head.static_info.block_size, 0);
-    }
-    ilog("Set up bitmap..");
+
+    ilog("Writing header to file...");
+    std::memcpy(file.data(), &head, sizeof(head)); // head
+    std::memcpy(file.data() + file.size() - sizeof(head), &head, sizeof(head)); // tail
+    ilog("done.\n");
+    file.close();
+
+    ilog("Set up root and bitmap..");
     cfs::filesystem disk_file(path_to_block_file);
     cfs::cfs_journaling_t journal(&disk_file);
     cfs::cfs_bitmap_block_mirroring_t raid1_bitmap(&disk_file, &journal);
     cfs::cfs_block_attribute_access_t attribute(&disk_file, &journal);
     raid1_bitmap.set_bit(0, true);
-    attribute.clear(0,
-    {
-        .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-        .block_type = INDEX_NODE_BLOCK,
-        .block_type_cow = 0,
-        .allocation_oom_scan_per_refresh_count = 0,
-        .index_node_referencing_number = 1,
-        .block_checksum = cfs::utils::arithmetic::hash5(empty_blk.data(), empty_blk.size()),
-    });
     const auto root = disk_file.lock(head.static_info.data_table_start);
     const auto now = utils::get_timespec();
-    struct stat root_stat = {
+    stat root_stat = {
         .st_dev = 0,
         .st_ino = 0,
         .st_mode = S_IFDIR | 0755,
@@ -312,6 +274,15 @@ void cfs::make_cfs(const std::string &path_to_block_file, const uint64_t block_s
         .st_ctim = now,
     };
     std::memcpy(root.data(), &root_stat, sizeof(root_stat));
+    attribute.clear(0,
+    {
+        .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
+        .block_type = INDEX_NODE_BLOCK,
+        .block_type_cow = 0,
+        .allocation_oom_scan_per_refresh_count = 0,
+        .index_node_referencing_number = 1,
+        .block_checksum = utils::arithmetic::hash5(reinterpret_cast<uint8_t *>(root.data()), root.size()),
+    });
     ilog("done.\n");
     ilog("CFS format complete\n");
     ilog("Sync data...\n");

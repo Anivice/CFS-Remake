@@ -1,6 +1,6 @@
 #ifndef CFS_COMMANDTEMPLATETREE_H
 #define CFS_COMMANDTEMPLATETREE_H
-
+#ifdef CFS_COMMAND_UTILITY
 #include <string>
 #include <vector>
 #include <memory>
@@ -247,5 +247,6 @@ namespace cmdTpTree
         }
     }
 } // cmdTpTree
+#endif //CFS_COMMAND_UTILITY
 
 #endif //CFS_COMMANDTEMPLATETREE_H

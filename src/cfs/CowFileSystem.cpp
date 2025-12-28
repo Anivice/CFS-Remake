@@ -1,7 +1,9 @@
 #include "CowFileSystem.h"
 #include "cfs.h"
+#ifdef CFS_COMMAND_UTILITY
 #include "readline.h"
 #include "history.h"
+#endif //CFS_COMMAND_UTILITY
 #include "smart_block_t.h"
 #include "version.h"
 #include "cfs_command.h"
@@ -157,11 +159,14 @@ namespace cfs
 
     void CowFileSystem::help()
     {
+#ifdef CFS_COMMAND_UTILITY
         std::cout << cmdTpTree::command_template_tree.get_help();
+#endif
     }
 
     void CowFileSystem::help_at(const std::vector<std::string> &vec)
     {
+#ifdef CFS_COMMAND_UTILITY
         try {
             const std::vector help_path(vec.begin() + 1, vec.end());
             std::ranges::for_each(help_path, [](const auto & v) { std::cout << v << " "; });
@@ -169,6 +174,7 @@ namespace cfs
         } catch (std::exception & e) {
             elog(e.what(), "\n");
         }
+#endif
     }
 
     void CowFileSystem::version()

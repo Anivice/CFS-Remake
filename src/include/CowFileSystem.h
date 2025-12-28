@@ -280,10 +280,12 @@ namespace cfs
         /// start readline utility mode
         void readline()
         {
+#ifdef CFS_COMMAND_UTILITY
             cmdTpTree::read_command(
                 [&](const std::vector<std::string> & vec) { return command_main_entry_point(vec); },
                 [&](const std::string & type) { return ls_under_pwd_of_cfs(type); },
                 "cfs> ");
+#endif //CFS_COMMAND_UTILITY
         }
     };
 } // cfs

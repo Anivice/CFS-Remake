@@ -156,7 +156,9 @@ std::string backtrace_level_2()
     {
         if (std::regex_search(symbol, matches, pattern) && matches.size() > 3)
         {
-            const std::string& executable_path = matches[1].str();
+            const std::string& exec_path_in_frame = matches[1].str();
+            const std::string& executable_path = (exec_path_in_frame.find("cfs") == std::string::npos ?
+                exec_path_in_frame : "/proc/" + std::to_string(getpid()) + "/exe");
             const std::string& traced_address = matches[2].str();
             const std::string& traced_runtime_address = matches[3].str();
             traced_info info;
@@ -214,8 +216,9 @@ std::string backtrace()
 
 cfs::error::generalCFSbaseError::generalCFSbaseError(const std::string& msg, const bool include_backtrace_msg)
 {
+#ifndef __DEBUG__
     message = msg;
-#ifdef __DEBUG__
+#else
     message = color::color(5,0,0) + "Error encountered: " + color::color(0,0,0,5,0,0) + msg + color::no_color();
     message += "\n ==> errno: " +
         (errno == 0 ? color::color(0,5,0) : color::color(5,0,0)) + strerror(errno) + color::no_color();

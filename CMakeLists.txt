@@ -17,68 +17,73 @@ set(CFS_STANDARD_VERSION "0.0.1")
 # DEBUG_TIV_SHOW                         - Generate instance for debugging void show()
 
 # readline only supports Makefile
-find_program(MAKE_EXECUTABLE NAMES make gmake REQUIRED)
-include(ExternalProject)
-set(NCURSES_MAKE_ENTIRE "${MAKE_EXECUTABLE} ${NCURSES_MAKE_ADDITIONAL_FLAGS}")
-message(STATUS "NCRUSES: ${NCURSES_MAKE_ENTIRE}")
-ExternalProject_Add(NCURSES
-        PREFIX              ${CMAKE_CURRENT_BINARY_DIR}/ncurses
-        SOURCE_DIR          ${CMAKE_SOURCE_DIR}/src/NonCMake/ncurses-6.5
-        INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/ncurses/install
-        CONFIGURE_COMMAND   <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> ${NCURSES_CONFIGURE_ADDITIONAL_FLAGS}
-        BUILD_COMMAND       /bin/sh -c "${NCURSES_MAKE_ENTIRE}"
-        INSTALL_COMMAND     ${MAKE_EXECUTABLE} install ${NCURSES_MAKE_INSTALL_ADDITIONAL_FLAGS}
-        INSTALL_BYPRODUCTS  <INSTALL_DIR>/lib/libncursesw.a
-        TEST_COMMAND        ""
-        INACTIVITY_TIMEOUT  15
-        CONFIGURE_HANDLED_BY_BUILD ON
-)
+if ("${BUILD_WITH_COMMAND}" STREQUAL "True")
+    message(STATUS "Build with readline support")
+    find_program(MAKE_EXECUTABLE NAMES make gmake REQUIRED)
+    include(ExternalProject)
+    set(NCURSES_MAKE_ENTIRE "${MAKE_EXECUTABLE} ${NCURSES_MAKE_ADDITIONAL_FLAGS}")
+    message(STATUS "NCRUSES: ${NCURSES_MAKE_ENTIRE}")
+    ExternalProject_Add(NCURSES
+            PREFIX              ${CMAKE_CURRENT_BINARY_DIR}/ncurses
+            SOURCE_DIR          ${CMAKE_SOURCE_DIR}/src/NonCMake/ncurses-6.5
+            INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/ncurses/install
+            CONFIGURE_COMMAND   <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> ${NCURSES_CONFIGURE_ADDITIONAL_FLAGS}
+            BUILD_COMMAND       /bin/sh -c "${NCURSES_MAKE_ENTIRE}"
+            INSTALL_COMMAND     ${MAKE_EXECUTABLE} install ${NCURSES_MAKE_INSTALL_ADDITIONAL_FLAGS}
+            INSTALL_BYPRODUCTS  <INSTALL_DIR>/lib/libncursesw.a
+            TEST_COMMAND        ""
+            INACTIVITY_TIMEOUT  15
+            CONFIGURE_HANDLED_BY_BUILD ON
+    )
 
-ExternalProject_Get_Property(NCURSES INSTALL_DIR)
-set(NCURSES_INCLUDE_DIR "${INSTALL_DIR}/include")
-set(NCURSES_LIB_DIR     "${INSTALL_DIR}/lib")
-file(MAKE_DIRECTORY "${NCURSES_INCLUDE_DIR}" "${NCURSES_LIB_DIR}")
+    ExternalProject_Get_Property(NCURSES INSTALL_DIR)
+    set(NCURSES_INCLUDE_DIR "${INSTALL_DIR}/include")
+    set(NCURSES_LIB_DIR     "${INSTALL_DIR}/lib")
+    file(MAKE_DIRECTORY "${NCURSES_INCLUDE_DIR}" "${NCURSES_LIB_DIR}")
 
-# Export to CMake
-add_library(ncurses::ncurses UNKNOWN IMPORTED)
-set_target_properties(ncurses::ncurses PROPERTIES
-        IMPORTED_LOCATION             "${NCURSES_LIB_DIR}/libncursesw.a" # <= ncurses lib location
-        INTERFACE_INCLUDE_DIRECTORIES "${NCURSES_INCLUDE_DIR}"
-)
-add_dependencies(ncurses::ncurses NCURSES)
-include_directories("${NCURSES_INCLUDE_DIR}/ncursesw")
-include_directories("${NCURSES_INCLUDE_DIR}")
-set(READLINE_MAKE_ENTIRE "${MAKE_EXECUTABLE} ${READLINE_MAKE_ADDITIONAL_FLAGS}")
-message(STATUS "READLINE: ${READLINE_MAKE_ENTIRE}")
-ExternalProject_Add(READLINE
-        PREFIX              ${CMAKE_CURRENT_BINARY_DIR}/readline
-        SOURCE_DIR          ${CMAKE_SOURCE_DIR}/src/NonCMake/readline-8.3
-        INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/readline/install
-        CONFIGURE_COMMAND   <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> --with-curses ${READLINE_CONFIGURE_ADDITIONAL_FLAGS}
-        BUILD_COMMAND       /bin/sh -c "${READLINE_MAKE_ENTIRE}"
-        INSTALL_COMMAND     ${MAKE_EXECUTABLE} install ${READLINE_MAKE_INSTALL_ADDITIONAL_FLAGS}
-        INSTALL_BYPRODUCTS  <INSTALL_DIR>/lib/libhistory.a <INSTALL_DIR>/lib/libreadline.a <INSTALL_DIR>/lib/libreadline.so <INSTALL_DIR>/lib/libhistory.so
-        TEST_COMMAND        ""
-        INACTIVITY_TIMEOUT  15
-        CONFIGURE_HANDLED_BY_BUILD ON
-)
+    # Export to CMake
+    add_library(ncurses::ncurses UNKNOWN IMPORTED)
+    set_target_properties(ncurses::ncurses PROPERTIES
+            IMPORTED_LOCATION             "${NCURSES_LIB_DIR}/libncursesw.a" # <= ncurses lib location
+            INTERFACE_INCLUDE_DIRECTORIES "${NCURSES_INCLUDE_DIR}"
+    )
+    add_dependencies(ncurses::ncurses NCURSES)
+    include_directories("${NCURSES_INCLUDE_DIR}/ncursesw")
+    include_directories("${NCURSES_INCLUDE_DIR}")
+    set(READLINE_MAKE_ENTIRE "${MAKE_EXECUTABLE} ${READLINE_MAKE_ADDITIONAL_FLAGS}")
+    message(STATUS "READLINE: ${READLINE_MAKE_ENTIRE}")
+    ExternalProject_Add(READLINE
+            PREFIX              ${CMAKE_CURRENT_BINARY_DIR}/readline
+            SOURCE_DIR          ${CMAKE_SOURCE_DIR}/src/NonCMake/readline-8.3
+            INSTALL_DIR         ${CMAKE_CURRENT_BINARY_DIR}/readline/install
+            CONFIGURE_COMMAND   <SOURCE_DIR>/configure --prefix=<INSTALL_DIR> --with-curses ${READLINE_CONFIGURE_ADDITIONAL_FLAGS}
+            BUILD_COMMAND       /bin/sh -c "${READLINE_MAKE_ENTIRE}"
+            INSTALL_COMMAND     ${MAKE_EXECUTABLE} install ${READLINE_MAKE_INSTALL_ADDITIONAL_FLAGS}
+            INSTALL_BYPRODUCTS  <INSTALL_DIR>/lib/libhistory.a <INSTALL_DIR>/lib/libreadline.a <INSTALL_DIR>/lib/libreadline.so <INSTALL_DIR>/lib/libhistory.so
+            TEST_COMMAND        ""
+            INACTIVITY_TIMEOUT  15
+            CONFIGURE_HANDLED_BY_BUILD ON
+    )
 
-ExternalProject_Get_Property(READLINE INSTALL_DIR)
-set(READLINE_INCLUDE_DIR "${INSTALL_DIR}/include")
-set(READLINE_LIB_DIR     "${INSTALL_DIR}/lib")
-file(MAKE_DIRECTORY "${READLINE_INCLUDE_DIR}" "${READLINE_LIB_DIR}")
+    ExternalProject_Get_Property(READLINE INSTALL_DIR)
+    set(READLINE_INCLUDE_DIR "${INSTALL_DIR}/include")
+    set(READLINE_LIB_DIR     "${INSTALL_DIR}/lib")
+    file(MAKE_DIRECTORY "${READLINE_INCLUDE_DIR}" "${READLINE_LIB_DIR}")
 
-# Export to CMake
-add_library(readline::readline UNKNOWN IMPORTED)
-set_target_properties(readline::readline PROPERTIES
-        IMPORTED_LOCATION               "${READLINE_LIB_DIR}/libhistory.a"
-        IMPORTED_LOCATION               "${READLINE_LIB_DIR}/libreadline.a"
-        INTERFACE_INCLUDE_DIRECTORIES   "${READLINE_INCLUDE_DIR}"
-)
-add_dependencies(readline::readline READLINE)
-add_dependencies(READLINE NCURSES)
-include_directories("${READLINE_INCLUDE_DIR}/readline")
-include_directories("${READLINE_INCLUDE_DIR}")
+    # Export to CMake
+    add_library(readline::readline UNKNOWN IMPORTED)
+    set_target_properties(readline::readline PROPERTIES
+            IMPORTED_LOCATION               "${READLINE_LIB_DIR}/libhistory.a"
+            IMPORTED_LOCATION               "${READLINE_LIB_DIR}/libreadline.a"
+            INTERFACE_INCLUDE_DIRECTORIES   "${READLINE_INCLUDE_DIR}"
+    )
+    add_dependencies(readline::readline READLINE)
+    add_dependencies(READLINE NCURSES)
+    include_directories("${READLINE_INCLUDE_DIR}/readline")
+    include_directories("${READLINE_INCLUDE_DIR}")
+
+    add_compile_definitions(CFS_COMMAND_UTILITY=1)
+endif ()
 
 include_directories(src/include)
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
@@ -143,13 +148,19 @@ add_executable(cfs
         src/bin/fsck.cpp src/bin/mkfs.cpp src/bin/mount.cpp
 )
 target_link_libraries(cfs PUBLIC cfs_obj)
-target_link_libraries(cfs_obj PUBLIC readline::readline ncurses::ncurses atomic)
+if ("${BUILD_WITH_COMMAND}" STREQUAL "True")
+    target_link_libraries(cfs_obj PUBLIC readline::readline ncurses::ncurses atomic)
+else ()
+    target_link_libraries(cfs_obj PUBLIC atomic)
+endif ()
+
 target_include_directories(cfs PRIVATE ${CMAKE_BINARY_DIR})
 target_include_directories(cfs_obj PRIVATE ${CMAKE_BINARY_DIR})
 add_dependencies(cfs_obj version.txt cfs.command.readline)
 
 # Add libfuse
-if ("${CFS_BUILD_WITH_FUSE}" STREQUAL "True")
+if ("${CFS_BUILD_WITH_FUSE}" STREQUAL "True" OR "${BUILD_WITH_FUSE}" STREQUAL "True")
+    message(STATUS "Build with FUSE")
     include(FindPkgConfig)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(LIBFUSE REQUIRED fuse3)
@@ -177,37 +188,41 @@ set(UNIT_TESTS "")
 
 # add_unit_test EXECUTABLE_NAME [FILES...]
 function(add_unit_test EXECUTABLE_NAME)
-    add_executable(${EXECUTABLE_NAME} ${ARGN})
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE cfs_obj)
-    if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
-        if ("${SANITIZER}" STREQUAL "address")
-            target_compile_options(${EXECUTABLE_NAME} PRIVATE -fsanitize=address -fsanitize=undefined)
-            target_link_libraries(${EXECUTABLE_NAME} PRIVATE asan ubsan atomic)
-        elseif("${SANITIZER}" STREQUAL "thread")
-            target_compile_options(${EXECUTABLE_NAME} PRIVATE -fsanitize=thread -fno-sanitize-recover=undefined -fno-sanitize=undefined)
-            target_link_libraries(${EXECUTABLE_NAME} PRIVATE tsan atomic)
+    if("${BUILD_WITH_TESTS}" STREQUAL "True")
+        add_executable(${EXECUTABLE_NAME} ${ARGN})
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE cfs_obj)
+        if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+            if ("${SANITIZER}" STREQUAL "address")
+                target_compile_options(${EXECUTABLE_NAME} PRIVATE -fsanitize=address -fsanitize=undefined)
+                target_link_libraries(${EXECUTABLE_NAME} PRIVATE asan ubsan atomic)
+            elseif("${SANITIZER}" STREQUAL "thread")
+                target_compile_options(${EXECUTABLE_NAME} PRIVATE -fsanitize=thread -fno-sanitize-recover=undefined -fno-sanitize=undefined)
+                target_link_libraries(${EXECUTABLE_NAME} PRIVATE tsan atomic)
+            endif()
         endif()
-    endif()
 
-    add_custom_target(SYMBOL_LINK_FOR_TEST_${EXECUTABLE_NAME} ALL
-            COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME} ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test
-            COMMENT "Creating symbol link ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test => ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME}"
-            DEPENDS ${EXECUTABLE_NAME}
-            BYPRODUCTS ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test)
+        add_custom_target(SYMBOL_LINK_FOR_TEST_${EXECUTABLE_NAME} ALL
+                COMMAND ${CMAKE_COMMAND} -E create_symlink ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME} ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test
+                COMMENT "Creating symbol link ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test => ${CMAKE_CURRENT_BINARY_DIR}/${EXECUTABLE_NAME}"
+                DEPENDS ${EXECUTABLE_NAME}
+                BYPRODUCTS ${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.test)
 
-    list(APPEND UNIT_TESTS "SYMBOL_LINK_FOR_TEST_${EXECUTABLE_NAME}")
-    set(UNIT_TESTS "${UNIT_TESTS}" PARENT_SCOPE)
+        list(APPEND UNIT_TESTS "SYMBOL_LINK_FOR_TEST_${EXECUTABLE_NAME}")
+        set(UNIT_TESTS "${UNIT_TESTS}" PARENT_SCOPE)
+    endif ()
 endfunction()
 
 if ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
     target_compile_definitions(cfs_obj PUBLIC DEBUG=1)
     target_compile_definitions(cfs PUBLIC DEBUG=1)
     if ("${SANITIZER}" STREQUAL "address")
+        message(STATUS "Address sanitizer")
         target_compile_options(cfs_obj PRIVATE -fsanitize=address -fsanitize=undefined)
         target_link_libraries(cfs_obj PRIVATE asan ubsan atomic)
         target_compile_options(cfs PRIVATE -fsanitize=address -fsanitize=undefined)
         target_link_libraries(cfs PRIVATE asan ubsan atomic)
     elseif("${SANITIZER}" STREQUAL "thread")
+        message(STATUS "Thread sanitizer")
         target_compile_options(cfs_obj PRIVATE -fsanitize=thread -fno-sanitize-recover=undefined -fno-sanitize=undefined)
         target_link_libraries(cfs_obj PRIVATE tsan atomic)
         target_compile_options(cfs PRIVATE -fsanitize=thread -fno-sanitize-recover=undefined -fno-sanitize=undefined)
@@ -268,25 +283,29 @@ add_unit_test(attributes src/tests/attributes.cpp)
 add_unit_test(cfs_block_manager src/tests/cfs_block_manager.cpp)
 add_unit_test(inode src/tests/inode.cpp)
 
-set(ZLIB_BUILD_EXAMPLES OFF)
-add_subdirectory(${CMAKE_SOURCE_DIR}/src/imgInTerm/libpng/zlib-1.3.1)
-add_library(ZLIB::ZLIB ALIAS zlib)
-set(ZLIB_LOCAL_INC ${CMAKE_SOURCE_DIR}/src/imgInTerm/libpng)
+if("${BUILD_WITH_TESTS}" STREQUAL "True")
+    message(STATUS "Build with test suites")
 
-add_subdirectory(src/imgInTerm)
-add_executable(test_all src/tests/test.cpp)
-target_compile_definitions(test_all PRIVATE CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}")
-target_link_libraries(test_all PRIVATE cfs_obj tiv)
-add_test(NAME "test" COMMAND ${CMAKE_CURRENT_BINARY_DIR}/test_all)
-add_dependencies(test_all ${UNIT_TESTS} cfs)
-foreach (test ${UNIT_TESTS})
-    message(STATUS ${test})
-endforeach ()
+    set(ZLIB_BUILD_EXAMPLES OFF)
+    add_subdirectory(${CMAKE_SOURCE_DIR}/src/imgInTerm/libpng/zlib-1.3.1)
+    add_library(ZLIB::ZLIB ALIAS zlib)
+    set(ZLIB_LOCAL_INC ${CMAKE_SOURCE_DIR}/src/imgInTerm/libpng)
 
-if("${DEBUG_TIV_SHOW}" STREQUAL "True")
-    add_executable(show src/tests/show.cpp)
-    target_link_libraries(show PRIVATE tiv)
-    add_dependencies(test_all show)
+    add_subdirectory(src/imgInTerm)
+    add_executable(test_all src/tests/test.cpp)
+    target_compile_definitions(test_all PRIVATE CMAKE_BINARY_DIR="${CMAKE_BINARY_DIR}")
+    target_link_libraries(test_all PRIVATE cfs_obj tiv)
+    add_test(NAME "test" COMMAND ${CMAKE_CURRENT_BINARY_DIR}/test_all)
+    add_dependencies(test_all ${UNIT_TESTS} cfs)
+    foreach (test ${UNIT_TESTS})
+        message(STATUS ${test})
+    endforeach ()
+
+    if("${DEBUG_TIV_SHOW}" STREQUAL "True")
+        add_executable(show src/tests/show.cpp)
+        target_link_libraries(show PRIVATE tiv)
+        add_dependencies(test_all show)
+    endif ()
 endif ()
 
 add_executable(snapshot src/bin/snapshot.c)
