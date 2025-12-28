@@ -287,7 +287,7 @@ uint64_t cfs::cfs_block_manager_t::allocate()
         bitmap_->set_bit(index, true);
         block_attribute_->clear(index, {
             .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-            .block_type = STORAGE_BLOCK,
+            .block_type = COW_REDUNDANCY_BLOCK,
             .block_type_cow = 0,
             .allocation_oom_scan_per_refresh_count = 0,
             .index_node_referencing_number = 1,
@@ -429,17 +429,14 @@ cfs::cfs_inode_service_t::page_locker_t cfs::cfs_inode_service_t::lock_page(cons
 
 uint64_t cfs::cfs_inode_service_t::copy_on_write(const uint64_t index, const bool linker)
 {
+    if (parent_fs_governor_->global_control_flags.load().no_pointer_and_storage_cow) {
+        return index;
+    }
+
     cfs_assert_simple(index != block_index_); // can't CoW on my own. this should be done by dentry
     bool success = false;
     const auto new_block = block_manager_->allocate();
-    block_attribute_->clear(new_block, {
-        .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-        .block_type = STORAGE_BLOCK,
-        .block_type_cow = 0,
-        .allocation_oom_scan_per_refresh_count = 0,
-        .index_node_referencing_number = 1,
-        .block_checksum = 0
-    });
+    block_attribute_->set<block_type>(new_block, STORAGE_BLOCK);
     g_transaction(journal_, success, GlobalTransaction_CreateRedundancy, index, new_block);
     const auto new_ = lock_page(new_block, linker);
     const auto old_ = lock_page(index, linker);
@@ -520,15 +517,7 @@ cfs::cfs_inode_service_t::reallocate_linearized_block_by_descriptor(const linear
     auto alloc = [&](const uint8_t blk_type)->uint64_t
     {
         const auto blk = block_manager_->allocate();
-        block_attribute_->clear(blk,
-         {
-            .block_status = 0,
-            .block_type = blk_type,
-            .block_type_cow = 0,
-            .allocation_oom_scan_per_refresh_count = 0,
-            .index_node_referencing_number = 1,
-            .block_checksum = 0, // just 0, newly_allocated_thus_no_cow indicated this block hasn't been modified
-        });
+        block_attribute_->set<block_type>(blk, blk_type);
         return blk;
     };
 

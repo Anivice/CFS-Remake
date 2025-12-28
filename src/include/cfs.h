@@ -60,8 +60,6 @@ namespace cfs
         struct runtime_info_t {
             uint64_t mount_timestamp;       // when was the last time it's mounted
             uint64_t last_check_timestamp;  // last time check ran
-            uint64_t snapshot_number;
-            uint64_t snapshot_number_cow;
             struct {
                 uint64_t clean:1;
                 uint64_t _reserved:63;
@@ -79,6 +77,10 @@ namespace cfs
             uint64_t _1;
             uint64_t _2;
             uint64_t _3;
+            uint64_t _4;
+            uint64_t _5;
+            uint64_t _6;
+            uint64_t _7;
         } _reserved_;
     };
     static_assert(sizeof(cfs_head_t) == cfs_header_size, "Faulty header size");

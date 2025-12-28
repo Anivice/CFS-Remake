@@ -22,6 +22,8 @@ namespace cfs
         cfs_block_manager_t block_manager_;
 
     public:
+        void set_nocow() { cfs_basic_filesystem_.global_control_flags.store({ .no_pointer_and_storage_cow = 1 }); }
+
         explicit CowFileSystem(const std::string & path) :
             cfs_basic_filesystem_(path),
             journaling_(&cfs_basic_filesystem_),

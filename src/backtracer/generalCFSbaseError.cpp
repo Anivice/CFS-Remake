@@ -200,9 +200,11 @@ std::string backtrace_level_2()
     return ss.str();
 }
 
+static std::mutex back_trace_mtx_;
 constexpr int g_pre_defined_level = 2;
-std::string backtrace()
+static std::string backtrace()
 {
+    std::lock_guard lock(back_trace_mtx_);
     std::signal(SIGPIPE, SIG_IGN);
     const auto level = cfs::utils::getenv("BACKTRACE_LEVEL");
     switch (level.empty() ? g_pre_defined_level

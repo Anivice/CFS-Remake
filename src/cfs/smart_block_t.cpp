@@ -376,6 +376,7 @@ void cfs::filesystem::block_shared_lock_t::unlock(const uint64_t index)
 
 cfs::filesystem::filesystem(const std::string &path_to_block_file) : static_info_({})
 {
+    global_control_flags.store({});
     file_.open(path_to_block_file);
     if (file_.size() < sizeof(cfs_head_t)) {
         throw error::cannot_even_read_cfs_header_in_that_small_tiny_file();

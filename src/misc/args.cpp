@@ -122,7 +122,7 @@ cfs::utils::ArgumentParser::ArgumentParser(const int argc, char **argv, const Pr
 
     for (int i = 1; i < argc; i++)
     {
-        args_parsed_t arg_parsed;
+        args_parsed_t arg_parsed { };
         const std::string arg = clean_arg(argv[i]);
         if (arg.size() == 1) {
             arg_parsed.short_name = arg[0];

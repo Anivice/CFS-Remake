@@ -272,8 +272,6 @@ namespace cfs
 
         printLine("mount_timestamp", head.runtime_info.mount_timestamp);
         printLine("last_check_timestamp", head.runtime_info.last_check_timestamp);
-        printLine("snapshot_number", head.runtime_info.snapshot_number);
-        printLine("snapshot_number_cow", head.runtime_info.snapshot_number_cow);
         printLine("clean", head.runtime_info.flags.clean);
         printLine("last_allocated_block", head.runtime_info.last_allocated_block);
         printLine("allocated_non_cow_blocks", head.runtime_info.allocated_non_cow_blocks);
@@ -710,6 +708,7 @@ namespace cfs
             };
         }
 
+        /// return root
         return {
             .child = std::make_shared<dentry_t>(
                 cfs_basic_filesystem_.cfs_header_block.get_info<root_inode_pointer>(),
@@ -1374,6 +1373,7 @@ namespace cfs
         status.f_flag = 0;
         status.f_namemax = 255;
         status.f_type = 0x65735546; // FUSE
+        dlog("Used blocks=", used, ", all blocks=", status.f_blocks, "\n");
         return status;
     }
 

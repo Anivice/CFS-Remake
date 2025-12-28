@@ -269,13 +269,6 @@ namespace cfs
         void clear(const uint64_t index, const cfs_block_attribute_t & value = { })
         {
             const auto lock_ = lock(index);
-
-            if (value.block_type == COW_REDUNDANCY_BLOCK && lock_->block_type != COW_REDUNDANCY_BLOCK) {
-                this->parent_fs_governor_->cfs_header_block.dec<allocated_non_cow_blocks>();
-            } else if (value.block_type != COW_REDUNDANCY_BLOCK && lock_->block_type == COW_REDUNDANCY_BLOCK) {
-                this->parent_fs_governor_->cfs_header_block.inc<allocated_non_cow_blocks>();
-            }
-
             *lock_ = value;
         }
         friend class smart_lock_t;

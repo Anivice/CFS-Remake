@@ -18,6 +18,7 @@ utils::PreDefinedArgumentType::PreDefinedArgument mountMainArgument = {
     { .short_name = 'p', .long_name = "path",       .argument_required = true,  .description = "Path to CFS archive file" },
     { .short_name = 'f', .long_name = "fuse",       .argument_required = true,  .description = "Fuse arguments" },
     { .short_name = 'e', .long_name = "endpoint",   .argument_required = true,  .description = "Mount endpoint" },
+    { .short_name = -1,  .long_name = "nocow",      .argument_required = false, .description = "Disable Copy-On-Write" },
 };
 
 extern "C" struct snapshot_ioctl_msg {
@@ -220,6 +221,11 @@ void *fuse_do_init(fuse_conn_info *conn, fuse_config *)
 {
     set_thread_name("fuse_do_init");
     fuse_set_feature_flag(conn, FUSE_CAP_IOCTL_DIR);
+    // fuse_set_feature_flag(conn, FUSE_CAP_ASYNC_READ);
+    // fuse_set_feature_flag(conn, FUSE_CAP_PARALLEL_DIROPS);
+    // fuse_set_feature_flag(conn, FUSE_CAP_SPLICE_READ);
+    // fuse_set_feature_flag(conn, FUSE_CAP_SPLICE_WRITE);
+    // fuse_set_feature_flag(conn, FUSE_CAP_SPLICE_MOVE);
     conn->max_write = 256 * 1024 * 1024;
     return nullptr;
 }
@@ -236,6 +242,17 @@ int fuse_statfs(const char *, struct statvfs *status)
     *status = cfs_entity_ptr->do_fstat();
     return 0;
 }
+
+// int fuse_do_write_buf(const char *, fuse_bufvec *buf, off_t off, fuse_file_info *)
+// {
+//     set_thread_name("fuse_do_write_buf");
+//
+// }
+//
+// int fuse_do_read_buf(const char *, struct fuse_bufvec **bufp, size_t size, off_t off, struct fuse_file_info *)
+// {
+//     set_thread_name("fuse_do_read_buf");
+// }
 
 static fuse_operations fuse_operation_vector_table { };
 
@@ -346,6 +363,7 @@ int mount_main(int argc, char **argv)
         char ** d_fuse_argv = fuse_argv.get();
 
         cfs_entity_ptr = std::make_unique<cfs::CowFileSystem>(parsed.at("path"));
+        if (parsed.contains("nocow")) cfs_entity_ptr->set_nocow();
         return fuse_redirect(d_fuse_argc, d_fuse_argv);
     }
     catch (const std::exception & e)

@@ -117,6 +117,10 @@ std::vector<uint8_t> cfs::inode_t::dump_inode_raw() const
 
 void cfs::inode_t::copy_on_write() // CoW entry
 {
+    if (inode_construct_info_.parent_fs_governor->global_control_flags.load().no_pointer_and_storage_cow) {
+        return;
+    }
+
     // check if we are a snapshot entry
     cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
         != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
@@ -156,18 +160,15 @@ void cfs::inode_t::copy_on_write() // CoW entry
 
 void cfs::inode_t::root_cow()
 {
+    if (inode_construct_info_.parent_fs_governor->global_control_flags.load().no_pointer_and_storage_cow) {
+        return;
+    }
+
     std::vector<uint8_t> data_;
     // create a new block
     const auto new_inode_num_ = inode_construct_info_.block_manager->allocate();
     // set attributes
-    inode_construct_info_.block_attribute->clear(new_inode_num_, {
-                                                     .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-                                                     .block_type = INDEX_NODE_BLOCK,
-                                                     .block_type_cow = 0,
-                                                     .allocation_oom_scan_per_refresh_count = 0,
-                                                     .index_node_referencing_number = 1,
-                                                     .block_checksum = 0,
-                                                 });
+    inode_construct_info_.block_attribute->set<block_type>(new_inode_num_, INDEX_NODE_BLOCK);
 
     /// dump my own data to new inode
     {
@@ -266,18 +267,10 @@ uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index
 
     // copy over
     const auto new_block = inode_construct_info_.block_manager->allocate();
+    inode_construct_info_.block_attribute->set<block_type>(new_block, INDEX_NODE_BLOCK);
     const auto new_lock = referenced_inode_->lock_page(new_block);
     cfs_assert_simple(content.size() == static_info_->block_size);
     std::memcpy(new_lock->data(), content.data(), content.size());
-    // set attributes
-    inode_construct_info_.block_attribute->clear(new_block, {
-                                                     .block_status = BLOCK_AVAILABLE_TO_MODIFY_0x00,
-                                                     .block_type = INDEX_NODE_BLOCK,
-                                                     .block_type_cow = 0,
-                                                     .allocation_oom_scan_per_refresh_count = 0,
-                                                     .index_node_referencing_number = 1,
-                                                     .block_checksum = 0,
-                                                 });
     // child old block redefined as cow by themselves
 
     // new pair: name, new_block, relink here
@@ -496,6 +489,10 @@ void cfs::dentry_t::add_entry(const std::string &name, const uint64_t index)
 
 void cfs::dentry_t::snapshot(const std::string &name)
 {
+    if (inode_construct_info_.parent_fs_governor->global_control_flags.load().no_pointer_and_storage_cow) {
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(operation_mutex_);
     copy_on_write();
     cfs_assert_simple(parent_inode_ == nullptr);
@@ -657,6 +654,10 @@ void cfs::dentry_t::snapshot(const std::string &name)
 
 void cfs::dentry_t::revert(const std::string &name)
 {
+    if (inode_construct_info_.parent_fs_governor->global_control_flags.load().no_pointer_and_storage_cow) {
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(operation_mutex_);
     cfs_assert_simple(parent_inode_ == nullptr); // force root
     bool success = false;
@@ -745,6 +746,10 @@ void cfs::dentry_t::revert(const std::string &name)
 
 void cfs::dentry_t::delete_snapshot(const std::string &name)
 {
+    if (inode_construct_info_.parent_fs_governor->global_control_flags.load().no_pointer_and_storage_cow) {
+        return;
+    }
+
     std::lock_guard<std::mutex> lock(operation_mutex_);
     copy_on_write();
     cfs_assert_simple(parent_inode_ == nullptr);
