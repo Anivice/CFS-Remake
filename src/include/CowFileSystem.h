@@ -78,9 +78,7 @@ namespace cfs
         dentry_t make_root_inode();
 
         template < class InodeType >
-        requires (std::is_same_v<InodeType, inode_t>
-            || std::is_same_v<InodeType, dentry_t>
-            || std::is_same_v<InodeType, file_t>)
+        requires (std::is_same_v<InodeType, inode_t> || std::is_same_v<InodeType, dentry_t>)
         InodeType make_child_inode(uint64_t index, inode_t * parent) {
             return InodeType(index, &cfs_basic_filesystem_, &block_manager_, &journaling_, &block_attribute_, parent);
         }
