@@ -23,8 +23,8 @@ namespace cfs
         } inode_construct_info_ { };
 
         inode_t * parent_inode_; /// parent
-        std::shared_ptr < cfs_inode_service_t > referenced_inode_; /// referenced inode
-        // uint64_t current_referenced_inode_; /// referenced inode number
+        std::unique_ptr < cfs_inode_service_t > referenced_inode_; /// referenced inode
+        uint64_t current_referenced_inode_; /// referenced inode number
         const decltype(inode_construct_info_.parent_fs_governor->static_info_) * static_info_; /// static info so I don't have to type
         uint64_t dentry_start_ = 0; /// dentry info offset, for root metadata jump
 
@@ -82,7 +82,6 @@ namespace cfs
 
         /// Return inode content size
         uint64_t size_unblocked() const { return referenced_inode_->cfs_inode_attribute->st_size; }
-        inode_t() = default;
 
     public:
         NO_COPY_OBJ(inode_t)
@@ -141,13 +140,38 @@ namespace cfs
         friend class dentry_t;
     };
 
+    class file_t : public inode_t {
+    public:
+        NO_COPY_OBJ(file_t)
+
+        /// Create a non-dentry inode
+        /// @param index Inode index
+        /// @param parent_fs_governor
+        /// @param block_manager
+        /// @param journal
+        /// @param block_attribute
+        /// @param parent_inode Parent inode, always dentry_t
+        file_t(
+            const uint64_t index,
+            filesystem * parent_fs_governor,
+            cfs_block_manager_t * block_manager,
+            cfs_journaling_t * journal,
+            cfs_block_attribute_access_t * block_attribute,
+            inode_t * parent_inode)
+        : inode_t(index, parent_fs_governor, block_manager, journal, block_attribute, parent_inode)
+        {
+            if (inode_type() == S_IFDIR) {
+                throw error::cannot_initialize_non_dentry_on_dentry_inodes();
+            }
+        }
+    };
+
     class dentry_t : public inode_t {
     private:
         /// create an inode under current dentry
         /// @param name Inode dentry name
         /// @return New inode
-        template < class InodeType > requires (std::is_same_v<InodeType, inode_t> || std::is_same_v<InodeType, dentry_t>)
-        InodeType make_inode_unblocked(const std::string & name);
+        template < class InodeType > InodeType make_inode_unblocked(const std::string & name);
 
     public:
         NO_COPY_OBJ(dentry_t)
@@ -166,7 +190,6 @@ namespace cfs
             cfs_journaling_t * journal,
             cfs_block_attribute_access_t * block_attribute,
             inode_t * parent_inode);
-        dentry_t(const inode_t & downgraded_target);
 
         using dentry_pairs_t = tsl::hopscotch_map<std::string, uint64_t>;
 
@@ -198,12 +221,10 @@ namespace cfs
         /// @param name snapshot name
         void revert(const std::string & name);
 
-        /// Delete a snapshot
-        /// @param name Snapshot name
         void delete_snapshot(const std::string & name);
     };
 
-    template < class InodeType > requires (std::is_same_v<InodeType, inode_t> || std::is_same_v<InodeType, dentry_t>)
+    template<class InodeType>
     InodeType dentry_t::make_inode_unblocked(const std::string &name)
     {
         const auto ptr = dentry_map_.find(name);
@@ -230,6 +251,23 @@ namespace cfs
                     .st_dev = 0,
                     .st_ino = new_index,
                     .st_mode = S_IFDIR | 0755,
+                    .st_nlink = 1,
+                    .st_uid = getuid(),
+                    .st_gid = getgid(),
+                    .st_rdev = 0,
+                    .st_size = 0,
+                    .st_blksize = static_cast<decltype(inode_stat.st_blksize)>(static_info_->block_size),
+                    .st_blocks = 0,
+                    .st_atim = now,
+                    .st_mtim = now,
+                    .st_ctim = now,
+                };
+            }
+            else if constexpr (std::is_same_v<InodeType, file_t>) {
+                inode_stat = {
+                    .st_dev = 0,
+                    .st_ino = new_index,
+                    .st_mode = S_IFREG | 0755,
                     .st_nlink = 1,
                     .st_uid = getuid(),
                     .st_gid = getgid(),

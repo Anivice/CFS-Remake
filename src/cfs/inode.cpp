@@ -121,8 +121,6 @@ void cfs::inode_t::copy_on_write() // CoW entry
         return;
     }
 
-    const auto current_referenced_inode_ = referenced_inode_->get_stat().st_ino;
-
     // check if we are a snapshot entry
     cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
         != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
@@ -135,9 +133,9 @@ void cfs::inode_t::copy_on_write() // CoW entry
         if (new_inode_num_ != current_referenced_inode_) // I got referenced
         {
             const auto old_ = current_referenced_inode_;
-            // current_referenced_inode_ = new_inode_num_; // get new inode
+            current_referenced_inode_ = new_inode_num_; // get new inode
             referenced_inode_.reset();
-            referenced_inode_ = std::make_shared<cfs_inode_service_t>(new_inode_num_,
+            referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
                                                                       inode_construct_info_.parent_fs_governor,
                                                                       inode_construct_info_.block_manager,
                                                                       inode_construct_info_.journal,
@@ -166,8 +164,6 @@ void cfs::inode_t::root_cow()
         return;
     }
 
-    const auto current_referenced_inode_ = referenced_inode_->get_stat().st_ino;
-
     std::vector<uint8_t> data_;
     // create a new block
     const auto new_inode_num_ = inode_construct_info_.block_manager->allocate();
@@ -182,9 +178,9 @@ void cfs::inode_t::root_cow()
     }
 
     const auto old_ = current_referenced_inode_;
-    // current_referenced_inode_ = new_inode_num_; // get new inode
+    current_referenced_inode_ = new_inode_num_; // get new inode
     referenced_inode_.reset();
-    referenced_inode_ = std::make_shared<cfs_inode_service_t>(new_inode_num_,
+    referenced_inode_ = std::make_unique<cfs_inode_service_t>(new_inode_num_,
                                                               inode_construct_info_.parent_fs_governor,
                                                               inode_construct_info_.block_manager,
                                                               inode_construct_info_.journal,
@@ -254,8 +250,6 @@ void cfs::inode_t::root_cow()
 
 uint64_t cfs::inode_t::copy_on_write_invoked_from_child(const uint64_t cow_index, const std::vector<uint8_t> &content)
 {
-    const auto current_referenced_inode_ = referenced_inode_->get_stat().st_ino;
-
     // check if we are a snapshot entry
     cfs_assert_simple(inode_construct_info_.block_attribute->get<block_status>(current_referenced_inode_)
         != BLOCK_FROZEN_AND_IS_ENTRY_POINT_OF_SNAPSHOTS_0x01);
@@ -304,8 +298,8 @@ cfs::inode_t::inode_t(
     parent_inode_(parent_inode),
     static_info_(&parent_fs_governor->static_info_)
 {
-    // current_referenced_inode_ = index;
-    referenced_inode_ = std::make_shared<cfs_inode_service_t>(index, parent_fs_governor, block_manager, journal, block_attribute);
+    current_referenced_inode_ = index;
+    referenced_inode_ = std::make_unique<cfs_inode_service_t>(index, parent_fs_governor, block_manager, journal, block_attribute);
     inode_construct_info_ = {
         .parent_fs_governor = parent_fs_governor,
         .block_manager = block_manager,
@@ -411,24 +405,6 @@ cfs::dentry_t::dentry_t(
     read_dentry_unblocked();
 }
 
-cfs::dentry_t::dentry_t(const inode_t & downgraded_target) : inode_t()
-{
-    std::lock_guard lock(operation_mutex_);
-    referenced_inode_ = downgraded_target.referenced_inode_; // transfer control
-    inode_construct_info_ = {
-        .parent_fs_governor = downgraded_target.inode_construct_info_.parent_fs_governor,
-        .block_manager = downgraded_target.inode_construct_info_.block_manager,
-        .journal = downgraded_target.inode_construct_info_.journal,
-        .block_attribute = downgraded_target.inode_construct_info_.block_attribute,
-    };
-
-    if (inode_type() != S_IFDIR) {
-        throw error::cannot_initialize_dentry_on_non_dentry_inodes();
-    }
-
-    read_dentry_unblocked();
-}
-
 cfs::dentry_t::dentry_pairs_t cfs::dentry_t::ls()
 {
     // updated from disk and should change sync with the memory so, just read memory
@@ -459,7 +435,7 @@ void cfs::dentry_t::unlink(const std::string & name)
                 this);
         target.copy_on_write();
         target.resize(0); // remove all data in inode pointers
-        inode_construct_info_.block_manager->deallocate(target.referenced_inode_->get_stat().st_ino); // remove child inode
+        inode_construct_info_.block_manager->deallocate(target.current_referenced_inode_); // remove child inode
     }
     else {
         // delink blocks one by one
@@ -532,7 +508,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
         root_raw_dump.resize(referenced_inode_->get_stat().st_size);
         referenced_inode_->read(reinterpret_cast<char *>(root_raw_dump.data()), root_raw_dump.size(), 0);
         new_inode.write(reinterpret_cast<char *>(root_raw_dump.data()), root_raw_dump.size(), 0);
-        new_inode_index = new_inode.referenced_inode_->get_stat().st_ino;
+        new_inode_index = new_inode.current_referenced_inode_;
         old_dentry_start_ = dentry_start_;
         const auto [lv1, lv2, lv3] = new_inode.referenced_inode_->linearize_all_blocks();
         level3s = lv3;
@@ -572,7 +548,7 @@ void cfs::dentry_t::snapshot(const std::string &name)
         new_dentry.copy_on_write(); // force at least one copy of CoW
 
         // update reference
-        new_inode_index = new_dentry.referenced_inode_->get_stat().st_ino;
+        new_inode_index = new_dentry.current_referenced_inode_;
     }
 
     // under current root, add snapshot entry link
@@ -713,9 +689,9 @@ void cfs::dentry_t::revert(const std::string &name)
     // get inode
     const uint64_t inode_pointer = ptr->second;
     // make a dentry from that
-    // current_referenced_inode_ = inode_pointer;
+    current_referenced_inode_ = inode_pointer;
     referenced_inode_.reset();
-    referenced_inode_ = std::make_shared<cfs_inode_service_t>(inode_pointer,
+    referenced_inode_ = std::make_unique<cfs_inode_service_t>(inode_pointer,
         inode_construct_info_.parent_fs_governor,
         inode_construct_info_.block_manager,
         inode_construct_info_.journal,
@@ -728,7 +704,6 @@ void cfs::dentry_t::revert(const std::string &name)
     root_cow(); // force a CoW to redirect root, skip check (we will discard)
 
     // add missing snapshot entry link
-    const auto current_referenced_inode_ = referenced_inode_->get_stat().st_ino;
     for (const auto & [pointer_name, pointer] : snapshot_entry_list)
     {
         if (pointer != current_referenced_inode_) {
@@ -815,7 +790,6 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
         }
     }
     // put this root into the list as the latest generation
-    const auto current_referenced_inode_ = referenced_inode_->get_stat().st_ino;
     generation_reference_table.emplace_back(utils::get_timespec().tv_sec, current_referenced_inode_);
     // then we sort the list
     std::ranges::sort(generation_reference_table,
@@ -992,7 +966,7 @@ void cfs::dentry_t::delete_snapshot(const std::string &name)
                 inode_construct_info_.block_attribute,
                 this); // construct target child
             occupied_blocks = dentry.referenced_inode_->linearize_all_blocks();
-            target_index = dentry.referenced_inode_->get_stat().st_ino; // update reference
+            target_index = dentry.current_referenced_inode_; // update reference
         }
 
         // remove all occupied blocks by snapshot entry point

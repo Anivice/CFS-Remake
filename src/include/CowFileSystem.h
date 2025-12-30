@@ -20,7 +20,6 @@ namespace cfs
         cfs_bitmap_block_mirroring_t mirrored_bitmap_;
         cfs_block_attribute_access_t block_attribute_;
         cfs_block_manager_t block_manager_;
-        std::unique_ptr < dentry_t > root_inode_;
 
     public:
         void set_nocow() { cfs_basic_filesystem_.global_control_flags.store({ .no_pointer_and_storage_cow = 1 }); }
