@@ -616,7 +616,8 @@ void cfs::cfs_inode_service_t::commit_from_linearized_block(allocation_map_t des
                     upper[block_offset].first = new_parent;
                 }
                 std::memcpy(parent_blk_lock->data(), block_data.data(), block_data.size() * sizeof(uint64_t));
-                if (new_parent != parent_blk) {
+                if (new_parent != parent_blk)
+                {
                     if (block_attribute_->get<block_status>(parent_blk) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                         block_attribute_->move<block_type, block_type_cow>(parent_blk);
                         block_attribute_->set<block_type>(parent_blk, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
@@ -756,8 +757,8 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
         // check how much need to we append
         if (offset > old_) {
             // we have holes
-            uint64_t hole_size = offset - old_; // skipped and not written size
-            uint64_t hole_offset = old_; // starts from old end
+            const uint64_t hole_size = offset - old_; // skipped and not written size
+            const uint64_t hole_offset = old_; // starts from old end
             write_unblocked(nullptr, hole_size, hole_offset, true);
         }
     }
@@ -792,7 +793,8 @@ uint64_t cfs::cfs_inode_service_t::write_unblocked(const char *data, const uint6
 
         const auto lock = lock_page(new_blk);
         copy_to_buffer(lock->data() + w_off, w_size);
-        if (new_blk != index) {
+        if (new_blk != index)
+        {
             if (block_attribute_->get<block_status>(index) == BLOCK_AVAILABLE_TO_MODIFY_0x00) {
                 block_attribute_->move<block_type, block_type_cow>(index);
                 block_attribute_->set<block_type>(index, COW_REDUNDANCY_BLOCK); // mark the old one as freeable CoW redundancy
